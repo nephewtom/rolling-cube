@@ -74,7 +74,7 @@ void main()
     }
 
     finalColor = (albedo*((tint + vec4(specular, 1.0))*vec4(lightDot, 1.0)));
-    finalColor += albedo*(ambient/2.0)*tint;
+    finalColor += albedo*(ambient/10.0)*tint; // no veo que el ambiente haga algo
 
     // Gamma correction
     finalColor = pow(finalColor, vec4(1.0/2.2));

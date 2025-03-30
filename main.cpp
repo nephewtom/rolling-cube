@@ -18,12 +18,44 @@ bool imgui_demo_window = false;
 #define GLSL_VERSION 330
 
 
-struct Grid {
+constexpr int NCELLS = 101;
+constexpr int BEGIN_CELL_POS = -50;
+constexpr int END_CELL_POS = 50;
+
+Shader shader;
+Vector4 ambient = { 0.1f, 0.1f, 0.1f, 1.0f };
+int ambientLoc;
+void loadShader() {
+	shader = LoadShader(TextFormat("shaders/lighting_with_instancing.vs", GLSL_VERSION),
+						TextFormat("shaders/lighting_with_instancing.fs", GLSL_VERSION));
+	shader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(shader, "viewPos");
+
+	ambientLoc = GetShaderLocation(shader, "ambient");
+	SetShaderValue(shader, ambientLoc, &ambient, SHADER_UNIFORM_VEC4);
+}
+
+Texture logo;
+Texture logoGround;
+void loadTextures() {
+	logo = LoadTexture("assets/logo.png");
+	logoGround = LoadTexture("assets/logo-ground.png");
+	
+	// Image image = LoadImage("shaders/cube_ao.png"); // Load image
+	// ImageFlipVertical(&image); // Flip the image vertically
+	// Texture texture = LoadTextureFromImage(image); // Convert to texture
+}
+
+struct Cell {
 	Color color;
 };
-Grid grid[101][101];
-Color defaultGridColor = {212,215,211,255};
-Model modelPlane;
+struct Ground {
+	Cell cells[NCELLS][NCELLS];
+	Mesh plane;
+	Model model;
+	Matrix *transforms;
+	Material material;
+};
+Ground ground;
 
 Color getRandomColor()
 {
@@ -35,10 +67,32 @@ Color getRandomColor()
 	};
 }
 
-void initGrid() {
-	for (int x = 0; x < 101; x++) {
-		for (int y = 0; y < 101; y++) {
-			grid[x][y].color = getRandomColor();
+void initGround() {
+	
+	ground.plane = GenMeshPlane(1.0f,1.0f,1,1);
+	ground.model = LoadModelFromMesh(ground.plane);
+	ground.model.materials[0].shader = shader;
+    ground.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logoGround;
+	
+	
+	ground.transforms = (Matrix *)RL_CALLOC(NCELLS*NCELLS, sizeof(Matrix));
+    int i = 0;
+    for (int x = BEGIN_CELL_POS; x <= END_CELL_POS; x++) {
+        for (int z = BEGIN_CELL_POS; z <= END_CELL_POS; z++) {
+            ground.transforms[i] = MatrixTranslate(x + 0.5f, 0.0f, z + 0.5f);
+            i++;
+        }
+    }
+	
+	ground.material = LoadMaterialDefault();
+	ground.material.shader = shader;
+	ground.material.maps[MATERIAL_MAP_DIFFUSE].texture = logo;
+
+	
+	// test of colored ground
+	for (int x = 0; x < NCELLS; x++) {
+		for (int y = 0; y < NCELLS; y++) {
+			ground.cells[x][y].color = getRandomColor();
 		}
 	}
 }
@@ -64,6 +118,7 @@ public:
 };
 
 struct Cube {
+	Model model;
 	Vector3 position;
 	Vector3 nextPosition;
 	Vector3 direction;
@@ -85,12 +140,13 @@ struct Cube {
 	float pitchChange;
 };
 Cube cube;
-Model model;
 
 Vector3 cubeInitPos = {0.5f, 0.51f, 0.5f};
 
 void initCube() {
+
 	cube = {
+		.model = LoadModelFromMesh(GenMeshCube(1,1,1)),
 		.position = cubeInitPos,
 		.nextPosition = cubeInitPos,
 		.direction = {-1.0f, 0.0f, 0.0f},
@@ -111,6 +167,9 @@ void initCube() {
 		.rollWav = LoadSound("assets/roll.wav"),
 		.pitchChange = 1.0f,
 	};
+	
+	cube.model.materials[0].shader = shader;
+    cube.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logo;
 }
 
 struct CubeCamera {
@@ -185,7 +244,7 @@ struct Keyboard {
 	int queuedKey;
 
 	bool cursorHidden;
-	bool gridRandomColors;
+	bool coloredGround;
 	bool instancingEnabled;
 };
 Keyboard kb = {
@@ -199,8 +258,8 @@ Keyboard kb = {
     .queuedKey = 0,
 
     .cursorHidden = false,
-	.gridRandomColors = false,
-	.instancingEnabled = false,
+	.coloredGround = false,
+	.instancingEnabled = true,
 };
 
 void mouseUpdateCameraAngles() {
@@ -417,8 +476,7 @@ void handleKeyboard() {
 			ShowCursor();
 	}
 	if (IsKeyPressed(KEY_F10)) { imgui_demo_window = !imgui_demo_window; }
-	if (IsKeyPressed(KEY_F4)) { kb.instancingEnabled = !kb.instancingEnabled; }
-	if (IsKeyPressed(KEY_F5)) { kb.gridRandomColors = !kb.gridRandomColors; }
+	if (IsKeyPressed(KEY_F5)) { kb.coloredGround = !kb.coloredGround; }
 	if (IsKeyPressed(KEY_F11)) { ToggleFullscreen(); }
 
 	int releasedKey =
@@ -463,16 +521,12 @@ void handleKeyboard() {
 
 void drawRollingCube() {
 
-	// DrawCubeWiresV(cube.position, (Vector3){1.0f, 1.0f, 1.0f}, BLUE);
-  
 	if (cube.isMoving) {
 			
 		rlPushMatrix();
 		{
 			rlMultMatrixf(MatrixToFloat(cube.transform));
-			DrawModel(model, cube.position, 1.0f, cube.facesColor);
-			// DrawCube(cube.position, 1.0f, 1.0f, 1.0f, cube.facesColor);
-			// DrawCubeWires(cube.position, 1.0f, 1.0f, 1.0f, cube.wiresColor);
+			DrawModel(cube.model, cube.position, 1.0f, cube.facesColor);
 		}
 		rlPopMatrix();
 
@@ -480,28 +534,21 @@ void drawRollingCube() {
 		DrawCylinderEx(Vector3Subtract(cube.rotationOrigin, vOffset),
 					   Vector3Add(cube.rotationOrigin, vOffset),
 					   0.05f, 0.05f, 20, ORANGE);
-		// DrawSphere(cube.rotationOrigin, 0.1f, YELLOW);
 				
 	} else {
-		DrawModel(model, cube.position, 1.0f, cube.facesColor);
-		// DrawCube(cube.position, 1.0f, 1.0f, 1.0f, cube.facesColor);
-		DrawCubeWires(cube.position, 1.0f, 1.0f, 1.0f, cube.wiresColor);
+		DrawModel(cube.model, cube.position, 1.0f, cube.facesColor);
+		// DrawCubeWires(cube.position, 1.0f, 1.0f, 1.0f, cube.wiresColor);
 	}
 }
 
-void drawGridPlane() {
-	float fx = -50.0f;
-	for (int x = 0; x < 101; x++, fx++) {
-		float fz = -50.0f;
-		for (int z = 0; z < 101; z++, fz++) {
+void drawColoredGround() {
+	float fx = BEGIN_CELL_POS;
+	for (int x = 0; x < NCELLS; x++, fx++) {
+		float fz = BEGIN_CELL_POS;
+		for (int z = 0; z < NCELLS; z++, fz++) {
 
-			if (kb.gridRandomColors) {
-				DrawTriangle3D({fx, 0.0f, fz}, {fx, 0.0f, fz+1}, {fx+1, 0.0f, fz+1}, grid[x][z].color);
-				DrawTriangle3D({fx+1, 0.0f, fz+1}, {fx+1, 0.0f, fz}, {fx, 0.0f, fz}, grid[x][z].color);
-
-			} else {
-				DrawModel(modelPlane, {fx+0.5f,0.0,fz+0.5f}, 1.0f, RAYWHITE);  
-			}
+			DrawTriangle3D({fx, 0.0f, fz}, {fx, 0.0f, fz+1}, {fx+1, 0.0f, fz+1}, ground.cells[x][z].color);
+			DrawTriangle3D({fx+1, 0.0f, fz+1}, {fx+1, 0.0f, fz}, {fx, 0.0f, fz}, ground.cells[x][z].color);
 
 		}
 	}
@@ -516,6 +563,7 @@ Wave wave = {
 	.sampleRate = 44100, 
 	.sampleSize = 16, // 16-bit samples
 	.channels = 1,	  // Mono sound
+	.data = 0
 };
 Sound waveSound;
 void initWave() {
@@ -535,7 +583,7 @@ Timer activationLightTimer("3secsTimer");
 Timer moveTimer("MoveTimer");
 int countTimer = 0;
 
-Light lights[MAX_LIGHTS] = { 0 };
+Light lights[MAX_LIGHTS];
 void testLightMovement(float delta) {
 
 	if (activationLightTimer.isEnabled()) {
@@ -543,7 +591,7 @@ void testLightMovement(float delta) {
 		if (!activationLightTimer.isDone()) {
 			return;
 		}
-		lights[1].position.x = 0.5f;
+		lights[1].position.x = -5.5f;
 		lights[1].enabled = true;
 		moveTimer.start(0.5f);
 		PlaySound(waveSound);
@@ -567,11 +615,35 @@ void testLightMovement(float delta) {
 }
 
 
+void createLights() {
+	lights[0] = CreateLight(LIGHT_POINT, { -2.5f, 0.5f, -2.5f }, Vector3Zero(), YELLOW, shader);
+	lights[1] = CreateLight(LIGHT_POINT, { 0.5f, 0.5f, 0.5f }, { 0.0f, 0.0f, 0.0f }, RED, shader);
+	lights[2] = CreateLight(LIGHT_POINT, { -2.5f, 0.5f, 2.5f }, { 0.0f, 0.0f, 0.0f }, BLUE, shader);
+	lights[3] = CreateLight(LIGHT_POINT, { 2.5f, 0.5f, -2.5f }, { 0.0f, 0.0f, 0.0f }, GREEN, shader);
+	lights[4] = CreateLight(LIGHT_DIRECTIONAL, { -5.0f, 2.0f, 5.0f }, { 0.0f, 0.0f, 0.0f }, WHITE, shader);
+	lights[5] = CreateLight(LIGHT_DIRECTIONAL, { 5.0f, 2.0f, -3.0f }, { 0.0f, 0.0f, 0.0f }, { 144, 147, 98, 255}, shader);
+	
+	TRACELOGD("sizeOf lights: %d", sizeof(lights)/sizeof(Light));
+	for (int i=0; i<MAX_LIGHTS; i++){
+		const char* type = lights[i].type == INACTIVE ? "INACTIVE" : lights[i].type == LIGHT_DIRECTIONAL ? "DIRECTIONAL" : "POINT";
+		TRACELOGD("lights[%i].type=%s", i, type);
+		Vector3 p = lights[i].position;
+		const char* position = TextFormat("x: %f, y:%f, z: %f", p.x, p.y, p.z);
+		TRACELOGD("lights[%i].position=%s", i, position);
+		lights[i].enabled = false;
+	}
+	lights[4].enabled = true;
+	lights[5].enabled = true;
+	lights[4].hidden = false;
+	lights[5].hidden = false;
+}
+
+
+
+
 void imguiMenus();
 void drawText(int margin);
 
-
-Vector4 ambient = { 0.1f, 0.1f, 0.1f, 1.0f };
 
 Vector2 fullHD = { 1920, 1080 };
 int main()
@@ -590,82 +662,22 @@ int main()
 		HideCursor();
 	}
 
-	Shader shader = LoadShader(TextFormat("shaders/lighting_with_instancing.vs", GLSL_VERSION),
-							   TextFormat("shaders/lighting_with_instancing.fs", GLSL_VERSION));
-	shader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(shader, "viewPos");
+	loadShader();
+	loadTextures();
+	createLights();
 
-	int ambientLoc = GetShaderLocation(shader, "ambient");
-	SetShaderValue(shader, ambientLoc, &ambient, SHADER_UNIFORM_VEC4);
-
-	lights[0] = CreateLight(LIGHT_POINT, { -2.5f, 0.5f, -2.5f }, Vector3Zero(), YELLOW, shader);
-	lights[1] = CreateLight(LIGHT_POINT, { 2.5f, 0.5f, 2.5f }, { 0.0f, 0.0f, 0.0f }, RED, shader);
-	lights[2] = CreateLight(LIGHT_POINT, { -2.5f, 0.5f, 2.5f }, { 0.0f, 0.0f, 0.0f }, BLUE, shader);
-	lights[3] = CreateLight(LIGHT_POINT, { 2.5f, 0.5f, -2.5f }, { 0.0f, 0.0f, 0.0f }, GREEN, shader);
-	lights[4] = CreateLight(LIGHT_DIRECTIONAL, { -5.0f, 2.0f, 5.0f }, { 0.0f, 0.0f, 0.0f }, WHITE, shader);
-	lights[5] = CreateLight(LIGHT_DIRECTIONAL, { 5.0f, 2.0f, -3.0f }, { 0.0f, 0.0f, 0.0f }, BLUE, shader);
-	
-	TRACELOGD("sizeOf lights: %d", sizeof(lights)/sizeof(Light));
-	for (int i=0; i<MAX_LIGHTS; i++){
-		const char* type = lights[i].type == INACTIVE ? "INACTIVE" : lights[i].type == LIGHT_DIRECTIONAL ? "DIRECTIONAL" : "POINT";
-		TRACELOGD("lights[%i].type=%s", i, type);
-		Vector3 p = lights[i].position;
-		const char* position = TextFormat("x: %f, y:%f, z: %f", p.x, p.y, p.z);
-		TRACELOGD("lights[%i].position=%s", i, position);
-		lights[i].enabled = false;
-	}
-	lights[4].enabled = true;
-	lights[5].enabled = true;
-	lights[4].hidden = false;
-	lights[5].hidden = false;
-
-
-	// Image image = LoadImage("shaders/cube_ao.png"); // Load image
-	// ImageFlipVertical(&image); // Flip the image vertically
-	// Texture texture = LoadTextureFromImage(image); // Convert to texture
-
-	Texture logo = LoadTexture("assets/logo.png");
-	
-    model = LoadModelFromMesh(GenMeshCube(1,1,1));
-    model.materials[0].shader = shader;
-    model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logo;
-
-
-	Mesh plane = GenMeshPlane(1.0f,1.0f,1,1);
-    modelPlane = LoadModelFromMesh(plane);	
-
-    modelPlane.materials[0].shader = shader;
-    modelPlane.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logo;
-
-	initGrid();
+	initGround();
 	initCube();
 	initCamera();
-    
-	rlImGuiSetup(true);
+
+	int instancing = 0;
+	int instancingLoc = GetShaderLocation(shader, "instancing");
+	SetShaderValue(shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
+
 
 	activationLightTimer.start(3.0f);
-
 	
-	
-	int instance = 0;
-	int instanceLoc = GetShaderLocation(shader, "instance");
-	SetShaderValue(shader, instanceLoc, &instance, SHADER_UNIFORM_INT);
-
-	Matrix transforms[101*101];
-
-    int i = 0;
-    for (int x = -50; x <= 50; x++) {
-        for (int z = -50; z <= 50; z++) {
-            transforms[i] = MatrixTranslate(x + 0.5f, 0.0f, z + 0.5f);
-            i++;
-        }
-    }
-	
-	
-	Material matInstances = LoadMaterialDefault();
-    matInstances.shader = shader;
-    matInstances.maps[MATERIAL_MAP_DIFFUSE].texture = logo;
-	
-	
+	rlImGuiSetup(true);
 	while (!WindowShouldClose()) // Main game loop
 	{
 		float delta = GetFrameTime();
@@ -706,37 +718,37 @@ int main()
 		
 		BeginDrawing();
 		{
-			ClearBackground(RAYWHITE);
+			ClearBackground(BLACK);
 
 			BeginMode3D(camera.c3d);
 			{
 				drawAxis();
 				// DrawSphere(camera.light.position, 0.2f, YELLOW);
 				// DrawSphereWires(camera.light.position, 0.21f, 16, 16, ORANGE);
-				DrawModel(model, {3.5f, 0.25f, 3.5f}, 0.5f, RED);
+				DrawModel(cube.model, {3.5f, 0.25f, 3.5f}, 0.5f, RED);
 				
 				// BeginShaderMode(instanceShader);
 				// EndShaderMode();
 				
-				if (kb.instancingEnabled) {
-					BeginShaderMode(shader);
-					instance = 1;
-					SetShaderValue(shader, instanceLoc, &instance, SHADER_UNIFORM_INT);
-					DrawMeshInstanced(plane, matInstances, transforms, 101*101);
-					EndShaderMode();
+				if (kb.coloredGround) {
+					drawColoredGround();
 				} else {
-					drawGridPlane();
+					BeginShaderMode(shader);
+					instancing = 1;
+					SetShaderValue(shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
+					DrawMeshInstanced(ground.plane, ground.material, ground.transforms, NCELLS*NCELLS);
+					EndShaderMode();
 				}
 				
 				BeginShaderMode(shader);
-				instance = 0;
-				SetShaderValue(shader, instanceLoc, &instance, SHADER_UNIFORM_INT);
+				instancing = 0;
+				SetShaderValue(shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
 				
 				// Draw several planes to check its appearance
-				DrawModel(modelPlane, {-2.5f,0.05,-2.5f}, 1.0f, RED);
-				DrawModel(modelPlane, {-3.5f,0.05,-2.5f}, 1.0f, RED);
-				DrawModel(modelPlane, {-4.5f,0.05,-2.5f}, 1.0f, RED);
-				DrawModel(modelPlane, {-4.5f,0.05,-3.5f}, 1.0f, RED);
+				DrawModel(ground.model, {-2.5f,0.05,-2.5f}, 1.0f, RED);
+				DrawModel(ground.model, {-3.5f,0.05,-2.5f}, 1.0f, RED);
+				DrawModel(ground.model, {-4.5f,0.05,-2.5f}, 1.0f, RED);
+				DrawModel(ground.model, {-4.5f,0.05,-3.5f}, 1.0f, RED);
 
 				drawRollingCube();
 				EndShaderMode();
@@ -765,10 +777,10 @@ int main()
 			EndMode3D();
 
 			int tp = 10; // topMargin
-			DrawFPS(10, tp);
-			DrawText("F1 - Toggle ImGui & DrawText", 10, tp + 20, 20, BLACK);
-			DrawText("F4 - Toggle multiple planes vs instancing", 10, tp + 40, 20, BLACK);
-			DrawText("F5 - Toggle grid colors", 10, tp + 60, 20, BLACK);
+			DrawRectangle(8, 8, 200, 44, RAYWHITE);
+			DrawFPS(12, tp);
+			DrawText("F1 - Toggle Menus", 12, tp + 20, 20, BLACK);
+			DrawText("F5 - Toggle ground colors", 12, tp + 60, 20, BLACK);
 			if (!kb.cursorHidden) {
 				imguiMenus();
 				drawText(tp+120);	  
@@ -806,14 +818,10 @@ Color ImVec4ToRaylibColor(ImVec4 col) {
 void imguiMenus() {
 
 	rlImGuiBegin();
-	ImGui::Begin("ImGui window");
+	ImGui::Begin("Keyboard & Mouse");
 
 	ImGui::SeparatorText("Keyboard");
-	ImVec4 gridColor = RaylibColorToImVec4(defaultGridColor);
-	if (ImGui::ColorEdit4("Default grid color", &gridColor.x)) {
-		defaultGridColor = ImVec4ToRaylibColor(gridColor);
-	}
-    ImGui::Checkbox("Colored Grid plane (F6)", &kb.gridRandomColors);
+	ImGui::Checkbox("Colored Ground plane (F6)", &kb.coloredGround);
 	ImGui::Spacing();
 	ImGui::Text("Press/Release time:"); ImGui::SameLine(180);
 	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.3f", kb.pressReleaseTime);
@@ -823,6 +831,10 @@ void imguiMenus() {
 	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.3f", cube.pitchChange);
 	ImGui::Spacing();
 	
+	ImGui::SeparatorText("Mouse");	
+	ImGui::End();
+
+	ImGui::Begin("Cube & models");
 	ImGui::SeparatorText("Cube");
 	ImGui::DragFloat3("position", (float *)&cube.position, 1.0f, -1000.0f, 1000.0f);
 	ImGui::DragFloat3("next position", (float *)&cube.nextPosition, 1.0f, -1000.0f, 1000.0f);
@@ -847,8 +859,11 @@ void imguiMenus() {
 	ImGui::DragFloat("angle_x", (float*)&camAngleX, 1.0f, 200.0f, 2000.0f);
 	ImGui::DragFloat("angle_y", (float*)&camAngleY, 1.0f, 200.0f, 2000.0f);
 	ImGui::Spacing();
+	ImGui::End();
 
+	ImGui::Begin("Lighting");
 	ImGui::SeparatorText("Lights");
+	ImGui::ColorEdit4("ambient", &ambient.x);
 	ImGui::Text("lightsCount:"); ImGui::SameLine(180);
 	ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%i", lightsCount);
 	ImVec4 lightColor[6];

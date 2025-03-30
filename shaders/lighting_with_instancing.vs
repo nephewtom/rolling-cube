@@ -8,7 +8,7 @@ in vec4 vertexColor;
 
 // Input uniform values
 in mat4 instanceTransform;
-uniform int instance;  // Choice variable
+uniform int instancing;  // used by DrawMeshInstanced
 
 uniform mat4 mvp;
 uniform mat4 matModel;
@@ -26,11 +26,14 @@ void main()
 {
     // Send vertex attributes to fragment shader
 	
-    fragPosition = (instance == 0) ? vec3(matModel*vec4(vertexPosition, 1.0)) : vec3(instanceTransform*vec4(vertexPosition, 1.0));
+    fragPosition = (instancing == 0) ?
+		vec3(matModel*vec4(vertexPosition, 1.0)) : vec3(instanceTransform*vec4(vertexPosition, 1.0));
+	
     fragTexCoord = vertexTexCoord;
-    fragColor = (instance == 0) ? vertexColor : vec4(1.0);;
+    fragColor = (instancing == 0) ? vertexColor : vec4(1.0);;
     fragNormal = normalize(vec3(matNormal*vec4(vertexNormal, 1.0)));
 
     // Calculate final vertex position
-    gl_Position = (instance == 0 ) ? mvp*vec4(vertexPosition, 1.0) : mvp*instanceTransform*vec4(vertexPosition, 1.0);
+    gl_Position = (instancing == 0 ) ?
+		mvp*vec4(vertexPosition, 1.0) : mvp*instanceTransform*vec4(vertexPosition, 1.0);
 }
