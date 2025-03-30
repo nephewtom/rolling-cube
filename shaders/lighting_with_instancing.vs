@@ -7,6 +7,9 @@ in vec3 vertexNormal;
 in vec4 vertexColor;
 
 // Input uniform values
+in mat4 instanceTransform;
+uniform int instance;  // Choice variable
+
 uniform mat4 mvp;
 uniform mat4 matModel;
 uniform mat4 matNormal;
@@ -22,11 +25,12 @@ out vec3 fragNormal;
 void main()
 {
     // Send vertex attributes to fragment shader
-    fragPosition = vec3(matModel*vec4(vertexPosition, 1.0));
+	
+    fragPosition = (instance == 0) ? vec3(matModel*vec4(vertexPosition, 1.0)) : vec3(instanceTransform*vec4(vertexPosition, 1.0));
     fragTexCoord = vertexTexCoord;
-    fragColor = vertexColor;
+    fragColor = (instance == 0) ? vertexColor : vec4(1.0);;
     fragNormal = normalize(vec3(matNormal*vec4(vertexNormal, 1.0)));
 
-	// Calculate final vertex position
-    gl_Position = mvp*vec4(vertexPosition, 1.0);
+    // Calculate final vertex position
+    gl_Position = (instance == 0 ) ? mvp*vec4(vertexPosition, 1.0) : mvp*instanceTransform*vec4(vertexPosition, 1.0);
 }

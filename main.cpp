@@ -1,4 +1,5 @@
 #include "raylib.h"
+#include <cstring>
 #define SUPPORT_TRACELOG
 #define SUPPORT_TRACELOG_DEBUG
 #include "utils.h"
@@ -13,15 +14,16 @@ bool imgui_demo_window = false;
 #include <math.h>
 #include <stdarg.h>
 
-#define GLSL_VERSION            330
 #include "rlights.c"
+#define GLSL_VERSION 330
 
 
 struct Grid {
 	Color color;
 };
-Grid grid[103][103];
+Grid grid[101][101];
 Color defaultGridColor = {212,215,211,255};
+Model modelPlane;
 
 Color getRandomColor()
 {
@@ -34,17 +36,36 @@ Color getRandomColor()
 }
 
 void initGrid() {
-	for (int x = 0; x < 103; x++) {
-		for (int y = 0; y < 103; y++) {
+	for (int x = 0; x < 101; x++) {
+		for (int y = 0; y < 101; y++) {
 			grid[x][y].color = getRandomColor();
 		}
 	}
 }
 
+class KeyDelay {
+public:
+    static constexpr float MinSpeed = 1.0f;
+    static constexpr float MaxSpeed = 10.0f;
+
+	// return interpolated speed taking Press/Release time as input
+    static float lerpSpeed(float time, float minTime, float maxTime) {
+        time = Clamp(time, minTime, maxTime);
+        return MinSpeed + (MaxSpeed - MinSpeed) * ((maxTime - time) / (maxTime - minTime));
+    }
+
+    static constexpr float MinPitch = 0.75f;
+    static constexpr float MaxPitch = 2.0f;    
+    static float lerpPitch(float time, float minTime, float maxTime) {
+        time = Clamp(time, minTime, maxTime);
+        return MinPitch + (MaxPitch - MinPitch) * ((maxTime - time) / (maxTime - minTime));
+    }
+    
+};
 
 struct Cube {
 	Vector3 position;
-	Vector3 targetPosition;
+	Vector3 nextPosition;
 	Vector3 direction;
 	Vector3 moveStep;
 	
@@ -59,28 +80,19 @@ struct Cube {
 
 	Color facesColor;
 	Color wiresColor;
-	
-	Sound rollWavSlow;
-	Sound rollWavNormal;
-	Sound rollWavFast;
-	Sound rollWavMax;
+
+	Sound rollWav;
+	float pitchChange;
 };
 Cube cube;
+Model model;
 
 Vector3 cubeInitPos = {0.5f, 0.51f, 0.5f};
-
-class Speed {
-public:
-    static constexpr float Slow = 2.5f;
-    static constexpr float Normal = 3.5f;
-    static constexpr float Fast = 4.5;
-    static constexpr float Max = 5.5;
-};
 
 void initCube() {
 	cube = {
 		.position = cubeInitPos,
-		.targetPosition = cubeInitPos,
+		.nextPosition = cubeInitPos,
 		.direction = {-1.0f, 0.0f, 0.0f},
 		.moveStep = {0.0f, 0.0f, 0.0f},
 
@@ -91,15 +103,13 @@ void initCube() {
 
 		.isMoving = false,
 		.animationProgress = 0.0f,
-		.animationSpeed = Speed::Slow,
+		.animationSpeed = 2.5f,
 
-		.facesColor = RED,
+		.facesColor = WHITE,
 		.wiresColor = GREEN,
-	
-		.rollWavSlow = LoadSound("assets/roll-slow.wav"),
-		.rollWavNormal = LoadSound("assets/roll-normal.wav"),
-		.rollWavFast = LoadSound("assets/roll-fast.wav"),
-		.rollWavMax = LoadSound("assets/roll-max.wav"),
+
+		.rollWav = LoadSound("assets/roll.wav"),
+		.pitchChange = 1.0f,
 	};
 }
 
@@ -109,14 +119,12 @@ struct CubeCamera {
 	Vector3 direction;
 	float angleX;
 	float angleY;
-
-	Light light;
 };
 CubeCamera camera;
 
 void initCamera() {
 	camera.c3d = {
-		.position = (Vector3){7.5f, 7.5f, 0.5f},
+		.position = (Vector3){10.0f, 3.0f, 0.5f},
 		.target = cubeInitPos,
 		.up = (Vector3){0.0f, 1.0f, 0.0f},
 		.fovy = 45.0f,
@@ -140,11 +148,19 @@ void initCamera() {
 void updateCamera(float delta) {
 
 	// Update camera position based cube position on angles from mouse
-	camera.c3d.target = Vector3Lerp(camera.c3d.target, cube.targetPosition, cube.animationSpeed * delta);
+	camera.c3d.target = Vector3Lerp(camera.c3d.target, cube.nextPosition, cube.animationSpeed * delta);
 
 	camera.c3d.position.x = camera.c3d.target.x + camera.distance * cosf(camera.angleY) * sinf(camera.angleX);
 	camera.c3d.position.y = camera.c3d.target.y + camera.distance * sinf(camera.angleY);
 	camera.c3d.position.z = camera.c3d.target.z + camera.distance * cosf(camera.angleY) * cosf(camera.angleX);
+
+// 	if (!camera.freeLight) {
+// 		camera.light.target = Vector3Lerp(camera.light.target, cube.nextPosition, cube.animationSpeed * delta);
+// 		camera.light.position = Vector3Lerp(camera.light.position, 
+// 											Vector3Add(cube.nextPosition, camera.lightPosRelative), 
+// 											cube.animationSpeed * delta);
+// 	}
+
 }
 
 struct Mouse {
@@ -162,27 +178,29 @@ struct Keyboard {
 	int pressedKey;
 	double keyPressTime;
 	double keyReleaseTime;
-	float releasePressTimeElapsed; // Between press and release
+	float pressReleaseTime; // Between press and release
 	float lastPressedKeyTime;
 		
 	bool hasQueuedKey;
 	int queuedKey;
 
 	bool cursorHidden;
-	bool shaderEnable;
 	bool gridRandomColors;
+	bool instancingEnabled;
 };
 Keyboard kb = {
     .pressedKey = 0,
     .keyPressTime = 0.0f,
     .keyReleaseTime = 0.0f,
-    .releasePressTimeElapsed = 0.0f,
+    .pressReleaseTime = 0.0f,
+	.lastPressedKeyTime = 0.0f,
+
     .hasQueuedKey = false,
     .queuedKey = 0,
 
-    .cursorHidden = true,
-    .shaderEnable = true,
+    .cursorHidden = false,
 	.gridRandomColors = false,
+	.instancingEnabled = false,
 };
 
 void mouseUpdateCameraAngles() {
@@ -239,7 +257,7 @@ void handleMouseButton() {
 }
 
 const float MIN_CAMERA_DISTANCE = 5.0f;  // Minimum zoom distance
-const float MAX_CAMERA_DISTANCE = 20.0f;  // Maximum zoom distance
+const float MAX_CAMERA_DISTANCE = 100.0f;  // Maximum zoom distance
 const float ZOOM_SPEED = 1.0f;           // Zoom sensitivity
 void handleMouseWheel() {
     // Handle mouse wheel for zoom
@@ -301,16 +319,6 @@ void movePositiveZ() {
 
 
 void calculateCubeMovement(int pressedKey) {
-
-	if (cube.animationSpeed == Speed::Max) {
-		PlaySound(cube.rollWavMax);
-	} else if (cube.animationSpeed == Speed::Fast) {
-		PlaySound(cube.rollWavFast);
-	} else if (cube.animationSpeed == Speed::Normal) {
-		PlaySound(cube.rollWavNormal);
-	} else {
-		PlaySound(cube.rollWavSlow);
-	}
 	
 	if (cube.direction.x == -1.0f) {
 		if (pressedKey == KEY_W) {
@@ -355,9 +363,9 @@ void calculateCubeMovement(int pressedKey) {
 		}
 	}
 
-	cube.targetPosition.x = cube.position.x + cube.moveStep.x;
-	cube.targetPosition.y = cube.position.y + cube.moveStep.y;
-	cube.targetPosition.z = cube.position.z + cube.moveStep.z;
+	cube.nextPosition.x = cube.position.x + cube.moveStep.x;
+	cube.nextPosition.y = cube.position.y + cube.moveStep.y;
+	cube.nextPosition.z = cube.position.z + cube.moveStep.z;
                 
 	cube.rotationAngle = 0.0f;
 	cube.animationProgress = 0.0f;
@@ -388,7 +396,12 @@ void updateCubeMovement(float delta) {
 	cube.transform = MatrixMultiply(cube.transform, translateBack);
 
 	if (cube.animationProgress >= 1.0f) {
-		cube.position = cube.targetPosition;
+
+		cube.pitchChange = KeyDelay::lerpPitch(kb.pressReleaseTime, 0.03f, 0.3f);
+		SetSoundPitch(cube.rollWav, cube.pitchChange);
+		PlaySound(cube.rollWav);
+		                
+		cube.position = cube.nextPosition;
 		cube.isMoving = false;
 		cube.animationProgress = 0.0f;
 		cube.rotationAngle = 0.0f;
@@ -403,9 +416,10 @@ void handleKeyboard() {
 		else 
 			ShowCursor();
 	}
-	if (IsKeyPressed(KEY_F4)) { kb.shaderEnable = !kb.shaderEnable; }
 	if (IsKeyPressed(KEY_F10)) { imgui_demo_window = !imgui_demo_window; }
+	if (IsKeyPressed(KEY_F4)) { kb.instancingEnabled = !kb.instancingEnabled; }
 	if (IsKeyPressed(KEY_F5)) { kb.gridRandomColors = !kb.gridRandomColors; }
+	if (IsKeyPressed(KEY_F11)) { ToggleFullscreen(); }
 
 	int releasedKey =
 		IsKeyReleased(KEY_W) ? KEY_W :
@@ -415,17 +429,10 @@ void handleKeyboard() {
 
 	if (kb.pressedKey !=0 && releasedKey == kb.pressedKey) {
 		kb.keyReleaseTime = GetTime();
-		kb.releasePressTimeElapsed = kb.keyReleaseTime - kb.keyPressTime;
-			
-		if (kb.releasePressTimeElapsed < 0.08) {
-			cube.animationSpeed = Speed::Max;
-		} else if (kb.releasePressTimeElapsed >= 0.08f && kb.releasePressTimeElapsed < 0.11f) {
-			cube.animationSpeed = Speed::Fast;
-		} else if (kb.releasePressTimeElapsed >= 0.11f && kb.releasePressTimeElapsed < 0.14f) {
-			cube.animationSpeed = Speed::Normal;
-		} else {
-			cube.animationSpeed = Speed::Slow;
-		}
+		kb.pressReleaseTime = kb.keyReleaseTime - kb.keyPressTime;
+		float t = kb.pressReleaseTime;
+		
+		cube.animationSpeed = KeyDelay::lerpSpeed(t, 0.01f, 0.5f);
 	}
 		
 	int pressedKey =
@@ -440,10 +447,10 @@ void handleKeyboard() {
 	if (pressedKey) {
 		kb.pressedKey = pressedKey;
 		kb.keyPressTime = GetTime();
-		if (kb.keyPressTime - kb.keyReleaseTime >= 0.14f) {
-			// Too much time between last release and next press
-			cube.animationSpeed = Speed::Slow;					
-		}
+
+		float t = kb.keyPressTime - kb.keyReleaseTime;
+		// Different than before (pressed after released)                 
+		cube.animationSpeed = KeyDelay::lerpSpeed(t, 0.01f, 0.5f);
 
 		if (!cube.isMoving) { // First time is pressed
 			calculateCubeMovement(pressedKey);
@@ -452,7 +459,6 @@ void handleKeyboard() {
 			kb.queuedKey = pressedKey;
 		}
 	}
-	
 }
 
 void drawRollingCube() {
@@ -464,54 +470,108 @@ void drawRollingCube() {
 		rlPushMatrix();
 		{
 			rlMultMatrixf(MatrixToFloat(cube.transform));
-			DrawCube(cube.position, 1.0f, 1.0f, 1.0f, cube.facesColor);
-			DrawCubeWires(cube.position, 1.0f, 1.0f, 1.0f, cube.wiresColor);
+			DrawModel(model, cube.position, 1.0f, cube.facesColor);
+			// DrawCube(cube.position, 1.0f, 1.0f, 1.0f, cube.facesColor);
+			// DrawCubeWires(cube.position, 1.0f, 1.0f, 1.0f, cube.wiresColor);
 		}
 		rlPopMatrix();
 
 		Vector3 vOffset = Vector3Scale(cube.rotationAxis, 0.2);
-		DrawCylinderEx(
-			Vector3Subtract(cube.rotationOrigin, vOffset),
-			Vector3Add(cube.rotationOrigin, vOffset),
-			0.05f, 0.05f, 20, ORANGE);
+		DrawCylinderEx(Vector3Subtract(cube.rotationOrigin, vOffset),
+					   Vector3Add(cube.rotationOrigin, vOffset),
+					   0.05f, 0.05f, 20, ORANGE);
 		// DrawSphere(cube.rotationOrigin, 0.1f, YELLOW);
 				
 	} else {
-		DrawCube(cube.position, 1.0f, 1.0f, 1.0f, cube.facesColor);
+		DrawModel(model, cube.position, 1.0f, cube.facesColor);
+		// DrawCube(cube.position, 1.0f, 1.0f, 1.0f, cube.facesColor);
 		DrawCubeWires(cube.position, 1.0f, 1.0f, 1.0f, cube.wiresColor);
 	}
 }
 
-void drawGrid() {
-	float fx = -50.5f;
-	for (int x = 0; x < 103; x++, fx++) {
-		float fz = -50.5f;
-		for (int z = 0; z < 103; z++, fz++) {
+void drawGridPlane() {
+	float fx = -50.0f;
+	for (int x = 0; x < 101; x++, fx++) {
+		float fz = -50.0f;
+		for (int z = 0; z < 101; z++, fz++) {
+
 			if (kb.gridRandomColors) {
-				DrawPlane({fx, 0.0f, fz}, {1.0f, 1.0f}, grid[x][z].color);
+				DrawTriangle3D({fx, 0.0f, fz}, {fx, 0.0f, fz+1}, {fx+1, 0.0f, fz+1}, grid[x][z].color);
+				DrawTriangle3D({fx+1, 0.0f, fz+1}, {fx+1, 0.0f, fz}, {fx, 0.0f, fz}, grid[x][z].color);
+
 			} else {
-				DrawPlane({fx, -0.1f, fz}, {1.0f, 1.0f}, defaultGridColor);
+				DrawModel(modelPlane, {fx+0.5f,0.0,fz+0.5f}, 1.0f, RAYWHITE);  
 			}
-			DrawLine3D({ fx - 0.5f, 0.0f, fz - 0.5f }, { fx + 0.5f, 0.0f, fz - 0.5f }, BLACK);
-			DrawLine3D({ fx + 0.5f, 0.0f, fz - 0.5f }, { fx + 0.5f, 0.0f, fz + 0.5f }, BLACK);
-			DrawLine3D({ fx - 0.5f, 0.0f, fz - 0.5f }, { fx - 0.5f, 0.0f, fz + 0.5f }, BLACK);
-			DrawLine3D({ fx - 0.5f, 0.0f, fz + 0.5f }, { fx + 0.5f, 0.0f, fz + 0.5f }, BLACK);
+
 		}
 	}
 }
 
-void drawStuff() {
-	// DrawGrid(100, 1.0f);
-	// DrawPlane({0.0f, -0.1f, 0.0f}, (Vector2) { 100.0, 100.0 }, WHITE);
-	drawGrid();
-	DrawCube({-3.5f, 0.51f, 2.5f}, 1.0f, 1.0f, 1.0f, BLUE);
-
-	DrawCubeWires({-3.5f, 0.51f, 2.5f}, 1.0f, 1.0f, 1.0f, GREEN);
-
-	drawRollingCube();	
+// Generate sine wave
+#define SAMPLE_RATE 44100  // Standard sample rate
+#define SAMPLES 5500    // 1 second of audio
+#define FREQUENCY 220.0f   // A4 note (440 Hz)
+Wave wave = {
+	.frameCount = SAMPLES,
+	.sampleRate = 44100, 
+	.sampleSize = 16, // 16-bit samples
+	.channels = 1,	  // Mono sound
+};
+Sound waveSound;
+void initWave() {
+	short* data = (short*)MemAlloc(SAMPLES * sizeof(short)); // Allocate buffer
+    for (int i = 0; i < SAMPLES; i++) {
+        float t = (float)i / SAMPLE_RATE; // Time
+        data[i] = (short)(sinf(2.0f * PI * FREQUENCY * t) * 32000); // Sine wave
+    }
+	wave.data = data;
+	waveSound = LoadSoundFromWave(wave);
 }
 
+
+
+#include "timer.cpp"
+Timer activationLightTimer("3secsTimer");
+Timer moveTimer("MoveTimer");
+int countTimer = 0;
+
+Light lights[MAX_LIGHTS] = { 0 };
+void testLightMovement(float delta) {
+
+	if (activationLightTimer.isEnabled()) {
+		activationLightTimer.update(delta);
+		if (!activationLightTimer.isDone()) {
+			return;
+		}
+		lights[1].position.x = 0.5f;
+		lights[1].enabled = true;
+		moveTimer.start(0.5f);
+		PlaySound(waveSound);
+	}
+
+	moveTimer.update(delta);
+	if (!moveTimer.isDone()) {
+		return;
+	}
+	countTimer++;
+	if (countTimer == 5) {
+		TRACELOGD("testLightMovement: countTimer = 5!");
+		lights[1].enabled = false;
+		countTimer = 0;
+		activationLightTimer.start(3.0f);
+		return;
+	}
+	PlaySound(waveSound);
+	lights[1].position.x += 1.0f;
+	moveTimer.start();
+}
+
+
 void imguiMenus();
+void drawText(int margin);
+
+
+Vector4 ambient = { 0.1f, 0.1f, 0.1f, 1.0f };
 
 Vector2 fullHD = { 1920, 1080 };
 int main()
@@ -524,26 +584,57 @@ int main()
 	TRACELOGD("*** Started Cube! ***");
 	SetTargetFPS(60);
 	InitAudioDevice();
+	initWave();
 
-	bool cursorHidden = true;
-	HideCursor();
+	if (kb.cursorHidden) {
+		HideCursor();
+	}
 
-	bool shaderEnable = true;
-	Shader shader = LoadShader(TextFormat("shaders/lighting.vs", GLSL_VERSION),
-							   TextFormat("shaders/lighting.fs", GLSL_VERSION));
+	Shader shader = LoadShader(TextFormat("shaders/lighting_with_instancing.vs", GLSL_VERSION),
+							   TextFormat("shaders/lighting_with_instancing.fs", GLSL_VERSION));
 	shader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(shader, "viewPos");
 
 	int ambientLoc = GetShaderLocation(shader, "ambient");
-	float ftmp[4] = {0.2f, 0.5f, 0.2f, 1.0f};
-	SetShaderValue(shader, ambientLoc, &ftmp, SHADER_UNIFORM_VEC4);
+	SetShaderValue(shader, ambientLoc, &ambient, SHADER_UNIFORM_VEC4);
+
+	lights[0] = CreateLight(LIGHT_POINT, { -2.5f, 0.5f, -2.5f }, Vector3Zero(), YELLOW, shader);
+	lights[1] = CreateLight(LIGHT_POINT, { 2.5f, 0.5f, 2.5f }, { 0.0f, 0.0f, 0.0f }, RED, shader);
+	lights[2] = CreateLight(LIGHT_POINT, { -2.5f, 0.5f, 2.5f }, { 0.0f, 0.0f, 0.0f }, BLUE, shader);
+	lights[3] = CreateLight(LIGHT_POINT, { 2.5f, 0.5f, -2.5f }, { 0.0f, 0.0f, 0.0f }, GREEN, shader);
+	lights[4] = CreateLight(LIGHT_DIRECTIONAL, { -5.0f, 2.0f, 5.0f }, { 0.0f, 0.0f, 0.0f }, WHITE, shader);
+	lights[5] = CreateLight(LIGHT_DIRECTIONAL, { 5.0f, 2.0f, -3.0f }, { 0.0f, 0.0f, 0.0f }, BLUE, shader);
+	
+	TRACELOGD("sizeOf lights: %d", sizeof(lights)/sizeof(Light));
+	for (int i=0; i<MAX_LIGHTS; i++){
+		const char* type = lights[i].type == INACTIVE ? "INACTIVE" : lights[i].type == LIGHT_DIRECTIONAL ? "DIRECTIONAL" : "POINT";
+		TRACELOGD("lights[%i].type=%s", i, type);
+		Vector3 p = lights[i].position;
+		const char* position = TextFormat("x: %f, y:%f, z: %f", p.x, p.y, p.z);
+		TRACELOGD("lights[%i].position=%s", i, position);
+		lights[i].enabled = false;
+	}
+	lights[4].enabled = true;
+	lights[5].enabled = true;
+	lights[4].hidden = false;
+	lights[5].hidden = false;
 
 
-	camera.light = CreateLight(LIGHT_POINT, camera.c3d.position, cube.position, WHITE, shader);
-	// Light redLight = CreateLight(LIGHT_POINT, { 10.0f, 5.0f, 10.0f }, { 10.0f, 0.0f, 10.0f }, RED, shader);
-	// Light blueLight = CreateLight(LIGHT_POINT, { 10.0f, 5.0f, -10.0f }, { 10.0f, 0.0f, -10.0f }, BLUE, shader);
-	// Light greenLight = CreateLight(LIGHT_POINT, { -10.0f, 5.0f, -10.0f }, { -10.0f, 0.0f, -10.0f }, GREEN, shader);
-	// // Light yellowLight = CreateLight(LIGHT_POINT, { 20.0f, 3.0f, -20.0f }, { 20.0f, 0.0f, -20.0f }, YELLOW, shader);
-	// // Light blueLight2 = CreateLight(LIGHT_POINT, { 25.0f, 3.0f, 20.0f }, { 25.0f, 0.0f, 20.0f }, BLUE, shader);
+	// Image image = LoadImage("shaders/cube_ao.png"); // Load image
+	// ImageFlipVertical(&image); // Flip the image vertically
+	// Texture texture = LoadTextureFromImage(image); // Convert to texture
+
+	Texture logo = LoadTexture("assets/logo.png");
+	
+    model = LoadModelFromMesh(GenMeshCube(1,1,1));
+    model.materials[0].shader = shader;
+    model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logo;
+
+
+	Mesh plane = GenMeshPlane(1.0f,1.0f,1,1);
+    modelPlane = LoadModelFromMesh(plane);	
+
+    modelPlane.materials[0].shader = shader;
+    modelPlane.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logo;
 
 	initGrid();
 	initCube();
@@ -551,6 +642,29 @@ int main()
     
 	rlImGuiSetup(true);
 
+	activationLightTimer.start(3.0f);
+
+	
+	
+	int instance = 0;
+	int instanceLoc = GetShaderLocation(shader, "instance");
+	SetShaderValue(shader, instanceLoc, &instance, SHADER_UNIFORM_INT);
+
+	Matrix transforms[101*101];
+
+    int i = 0;
+    for (int x = -50; x <= 50; x++) {
+        for (int z = -50; z <= 50; z++) {
+            transforms[i] = MatrixTranslate(x + 0.5f, 0.0f, z + 0.5f);
+            i++;
+        }
+    }
+	
+	
+	Material matInstances = LoadMaterialDefault();
+    matInstances.shader = shader;
+    matInstances.maps[MATERIAL_MAP_DIFFUSE].texture = logo;
+	
 	
 	while (!WindowShouldClose()) // Main game loop
 	{
@@ -574,9 +688,21 @@ int main()
 		float cameraPos[3] = { camera.c3d.position.x, camera.c3d.position.y, camera.c3d.position.z };
 		SetShaderValue(shader, shader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
 
-		camera.light.position = camera.c3d.position;
-		camera.light.target = cube.position;
-		UpdateLightValues(shader, camera.light);
+        if (IsKeyPressed(KEY_ONE))   { lights[0].enabled = !lights[0].enabled; }
+        if (IsKeyPressed(KEY_TWO))   { lights[1].enabled = !lights[1].enabled; }
+        if (IsKeyPressed(KEY_THREE)) { lights[2].enabled = !lights[2].enabled; }
+        if (IsKeyPressed(KEY_FOUR))  { lights[3].enabled = !lights[3].enabled; }
+        if (IsKeyPressed(KEY_FIVE))  { lights[4].enabled = !lights[4].enabled; }
+        if (IsKeyPressed(KEY_SIX))  { lights[4].enabled = !lights[5].enabled; }
+
+		SetShaderValue(shader, ambientLoc, &ambient, SHADER_UNIFORM_VEC4);
+		
+		for (int i = 0; i < MAX_LIGHTS; i++) {
+			UpdateLightValues(shader, lights[i]);
+		}
+
+		testLightMovement(delta);
+		
 		
 		BeginDrawing();
 		{
@@ -585,44 +711,75 @@ int main()
 			BeginMode3D(camera.c3d);
 			{
 				drawAxis();
-				// drawGrid();
-				if (shaderEnable) {
+				// DrawSphere(camera.light.position, 0.2f, YELLOW);
+				// DrawSphereWires(camera.light.position, 0.21f, 16, 16, ORANGE);
+				DrawModel(model, {3.5f, 0.25f, 3.5f}, 0.5f, RED);
+				
+				// BeginShaderMode(instanceShader);
+				// EndShaderMode();
+				
+				if (kb.instancingEnabled) {
 					BeginShaderMode(shader);
-					drawStuff();
+					instance = 1;
+					SetShaderValue(shader, instanceLoc, &instance, SHADER_UNIFORM_INT);
+					DrawMeshInstanced(plane, matInstances, transforms, 101*101);
 					EndShaderMode();
 				} else {
-					drawStuff();
+					drawGridPlane();
 				}
+				
+				BeginShaderMode(shader);
+				instance = 0;
+				SetShaderValue(shader, instanceLoc, &instance, SHADER_UNIFORM_INT);
+				
+				// Draw several planes to check its appearance
+				DrawModel(modelPlane, {-2.5f,0.05,-2.5f}, 1.0f, RED);
+				DrawModel(modelPlane, {-3.5f,0.05,-2.5f}, 1.0f, RED);
+				DrawModel(modelPlane, {-4.5f,0.05,-2.5f}, 1.0f, RED);
+				DrawModel(modelPlane, {-4.5f,0.05,-3.5f}, 1.0f, RED);
+
+				drawRollingCube();
+				EndShaderMode();
+
+				// Draw spheres to show where the lights are
+				for (int i = 0; i < MAX_LIGHTS; i++)
+				{
+					if (lights[i].type == INACTIVE) continue;
+					if (lights[i].hidden == true) continue;
+
+					if (lights[i].enabled)  {
+						DrawSphereEx(lights[i].position, 0.2f, 8, 8, lights[i].color);
+					}
+					else { 
+						DrawSphereWires(lights[i].position, 0.2f, 8, 8, ColorAlpha(lights[i].color, 0.3f));
+					}
+			
+					if (lights[i].type == LIGHT_DIRECTIONAL) {
+						DrawLine3D(lights[i].position, lights[i].target, lights[i].color);
+						DrawSphereWires(lights[i].target, 0.021f, 4, 4, lights[i].color);
+					}
+				}
+
+
 			}
 			EndMode3D();
 
-			if (!cursorHidden) {
+			int tp = 10; // topMargin
+			DrawFPS(10, tp);
+			DrawText("F1 - Toggle ImGui & DrawText", 10, tp + 20, 20, BLACK);
+			DrawText("F4 - Toggle multiple planes vs instancing", 10, tp + 40, 20, BLACK);
+			DrawText("F5 - Toggle grid colors", 10, tp + 60, 20, BLACK);
+			if (!kb.cursorHidden) {
 				imguiMenus();
+				drawText(tp+120);	  
 			}
-			
-			DrawText(TextFormat("cube.position: {%.2f, %.2f, %.2f}",
-								cube.position.x, cube.position.y, cube.position.z),
-					 10, 10, 20, BLACK);
-			DrawText(TextFormat(
-						 "cube.targetPosition: {%.2f, %.2f, %.2f}",
-						 cube.targetPosition.x,
-						 cube.targetPosition.y,
-						 cube.targetPosition.z),
-					 10, 30, 20, BLACK);
-
-			DrawText(TextFormat("pressedKey: %d", kb.pressedKey),
-					 10, 80, 20, BLACK);
-			DrawText(TextFormat("releasePressTimeElapsed: %.4f", kb.releasePressTimeElapsed),
-					 10, 100, 20, BLACK);
-			DrawText(TextFormat("cube.animationSpeed: %.4f", cube.animationSpeed),
-					 10, 120, 20, BLACK);
 		}
 		EndDrawing();
 	}
 	rlImGuiShutdown();
 
 	UnloadShader(shader);   // Unload shader
-	// UnloadSound(cube.rollWav);
+	UnloadSound(cube.rollWav);
 	CloseAudioDevice();
 	CloseWindow();
     return 0;
@@ -648,50 +805,89 @@ Color ImVec4ToRaylibColor(ImVec4 col) {
 }
 void imguiMenus() {
 
-	ImVec4 cubeFacesColor = RaylibColorToImVec4(cube.facesColor);
-	ImVec4 cubeWiresColor = RaylibColorToImVec4(cube.wiresColor);
-	ImVec4 gridColor = RaylibColorToImVec4(defaultGridColor);
-
 	rlImGuiBegin();
 	ImGui::Begin("ImGui window");
 
+	ImGui::SeparatorText("Keyboard");
+	ImVec4 gridColor = RaylibColorToImVec4(defaultGridColor);
+	if (ImGui::ColorEdit4("Default grid color", &gridColor.x)) {
+		defaultGridColor = ImVec4ToRaylibColor(gridColor);
+	}
+    ImGui::Checkbox("Colored Grid plane (F6)", &kb.gridRandomColors);
+	ImGui::Spacing();
+	ImGui::Text("Press/Release time:"); ImGui::SameLine(180);
+	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.3f", kb.pressReleaseTime);
+	ImGui::Text("Cube animation speed:"); ImGui::SameLine(180);
+	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.3f", cube.animationSpeed); ImGui::SameLine(280);
+	ImGui::Text("Pitch change:"); ImGui::SameLine(380);
+	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.3f", cube.pitchChange);
+	ImGui::Spacing();
+	
 	ImGui::SeparatorText("Cube");
 	ImGui::DragFloat3("position", (float *)&cube.position, 1.0f, -1000.0f, 1000.0f);
+	ImGui::DragFloat3("next position", (float *)&cube.nextPosition, 1.0f, -1000.0f, 1000.0f);
 	ImGui::DragFloat3("direction", (float *)&cube.direction, 1.0f, -1000.0f, 1000.0f);
 	ImGui::DragFloat3("rotationAxis", (float *)&cube.rotationAxis, 1.0f, -1000.0f, 1000.0f);
 	ImGui::DragFloat("rotationAngle", (float *)&cube.rotationAngle, 1.0f, 200.0f, 2000.0f);
+	ImVec4 cubeFacesColor = RaylibColorToImVec4(cube.facesColor);
 	if (ImGui::ColorEdit4("faces color", &cubeFacesColor.x)) {
 		cube.facesColor = ImVec4ToRaylibColor(cubeFacesColor);
-
 	}
+	ImVec4 cubeWiresColor = RaylibColorToImVec4(cube.wiresColor);
 	if (ImGui::ColorEdit4("wires color", &cubeWiresColor.x)) {
 		cube.wiresColor = ImVec4ToRaylibColor(cubeWiresColor);
 	}
-
 	ImGui::Spacing();
 
 	ImGui::SeparatorText("Camera");
 	ImGui::DragFloat3("position ", (float *)&camera.c3d.position, 1.0f, -1000.0f, 1000.0f);
-	ImGui::DragFloat3("target", (float *)&camera.c3d.target, 1.0f, -1000.0f, 1000.0f);
+	ImGui::DragFloat3("target ", (float *)&camera.c3d.target, 1.0f, -1000.0f, 1000.0f);
 	float camAngleX = camera.angleX * RAD2DEG;
 	float camAngleY = camera.angleY * RAD2DEG;
 	ImGui::DragFloat("angle_x", (float*)&camAngleX, 1.0f, 200.0f, 2000.0f);
 	ImGui::DragFloat("angle_y", (float*)&camAngleY, 1.0f, 200.0f, 2000.0f);
-
-	ImGui::DragFloat3("lightPosition ", (float *)&camera.light.position, 1.0f, -1000.0f, 1000.0f);
-	ImGui::DragFloat3("lightTarget", (float *)&camera.light.target, 1.0f, -1000.0f, 1000.0f);
-
 	ImGui::Spacing();
 
 	ImGui::SeparatorText("Lights");
-
-	if (ImGui::ColorEdit4("grid color", &gridColor.x)) {
-		defaultGridColor = ImVec4ToRaylibColor(gridColor);
+	ImGui::Text("lightsCount:"); ImGui::SameLine(180);
+	ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%i", lightsCount);
+	ImVec4 lightColor[6];
+	for (int i=0; i<=5; i++) {
+		const char* posStr = TextFormat("position %i", i);
+		const char* colorStr = TextFormat("color %i", i);
+		const char* type = (lights[i].type == LIGHT_POINT ? "Point" : "Directional");
+		const char* enabledStr = TextFormat("Light %i %s", i, type);
+	    ImGui::Checkbox(enabledStr, &lights[i].enabled);
+		ImGui::DragFloat3(posStr, (float *)&lights[i].position, 0.5f, -20.0f, 20.0f);
+		lightColor[i] = RaylibColorToImVec4(lights[i].color);
+		if (ImGui::ColorEdit4(colorStr, &lightColor[i].x)) {
+			lights[i].color = ImVec4ToRaylibColor(lightColor[i]);
+		}
+		if (lights[i].type == LIGHT_DIRECTIONAL) {
+			const char* targetStr = TextFormat("target %i", i);
+			ImGui::DragFloat3(targetStr, (float *)&lights[i].target, 0.5f, -100.0f, 100.0f);
+		}
+		ImGui::Spacing();
 	}
+
+    // ImGui::Checkbox("free light", &camera.freeLight);        
+	// ImGui::DragFloat3("position  ", (float *)&camera.light.position, 0.2f, -1000.0f, 1000.0f);
+	// ImGui::DragFloat3("target  ", (float *)&camera.light.target, 0.2f, -1000.0f, 1000.0f);
+	// ImVec4 lightColor = RaylibColorToImVec4(camera.light.color);
+	// if (ImGui::ColorEdit4("color", &lightColor.x)) {
+	// 	camera.light.color = ImVec4ToRaylibColor(lightColor);
+	// }
+
 	ImGui::End();
 
 	if (imgui_demo_window) {
 		ImGui::ShowDemoWindow(&imgui_demo_window);
 	}
 	rlImGuiEnd();
+}
+
+void drawText(int margin) {
+	DrawText(TextFormat("cube.position: {%.2f, %.2f, %.2f}",
+						cube.position.x, cube.position.y, cube.position.z),
+			 10, margin, 20, BLACK);
 }

@@ -11,8 +11,11 @@ typedef struct {
     Vector3 position;
     Vector3 target;
     Color color;
-    float attenuation;
-    
+    bool hidden;
+	
+	float attenuation;
+	
+  
     // Shader locations
     int enabledLoc;
     int typeLoc;
@@ -24,7 +27,8 @@ typedef struct {
 
 // Light type
 typedef enum {
-    LIGHT_DIRECTIONAL = 0,
+	INACTIVE = 0,
+    LIGHT_DIRECTIONAL = 1,
     LIGHT_POINT
 } LightType;
 
@@ -66,6 +70,7 @@ Light CreateLight(int type, Vector3 position, Vector3 target, Color color, Shade
         light.position = position;
         light.target = target;
         light.color = color;
+		light.hidden = true;
 
         // NOTE: Lighting shader naming must be the provided ones
         light.enabledLoc = GetShaderLocation(shader, TextFormat("lights[%i].enabled", lightsCount));
