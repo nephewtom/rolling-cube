@@ -1,5 +1,4 @@
 #include "raylib.h"
-#include <cstring>
 #define SUPPORT_TRACELOG
 #define SUPPORT_TRACELOG_DEBUG
 #include "utils.h"
@@ -13,14 +12,12 @@ bool imgui_demo_window = false;
 
 #include <math.h>
 #include <stdarg.h>
+#include <stdio.h>
 
 #include "rlights.c"
 #define GLSL_VERSION 330
 
-
-constexpr int NCELLS = 101;
-constexpr int BEGIN_CELL_POS = -50;
-constexpr int END_CELL_POS = 50;
+//********** Shaders and Textures
 
 Shader shader;
 Vector4 ambient = { 0.1f, 0.1f, 0.1f, 1.0f };
@@ -45,17 +42,93 @@ void loadTextures() {
 	// Texture texture = LoadTextureFromImage(image); // Convert to texture
 }
 
+#include "cubemap.c"
+struct Skybox {
+	Mesh cube;
+	Model model;
+	Shader cubemap;
+};
+void loadSkybox(Skybox& skybox) {
+	skybox.cube = GenMeshCube(1.0f, 1.0f, 1.0f);
+	skybox.model = LoadModelFromMesh(skybox.cube);
+	skybox.model.materials[0].shader = LoadShader(TextFormat("shaders/skybox.vs", GLSL_VERSION),
+												  TextFormat("shaders/skybox.fs", GLSL_VERSION));
+	
+	int envMapLoc = GetShaderLocation(skybox.model.materials[0].shader, "environmentMap");
+	int mmc[1] = {MATERIAL_MAP_CUBEMAP};
+	int valueOne[1] = { 1 }; 
+	int valueZero[1] = { 0 }; 
+	SetShaderValue(skybox.model.materials[0].shader, envMapLoc, mmc, SHADER_UNIFORM_INT);
+	int doGammaLoc = GetShaderLocation(skybox.model.materials[0].shader, "doGamma");
+	SetShaderValue(skybox.model.materials[0].shader, doGammaLoc, valueOne, SHADER_UNIFORM_INT);
+	int vflippedLoc = GetShaderLocation(skybox.model.materials[0].shader, "vflipped");
+	SetShaderValue(skybox.model.materials[0].shader, vflippedLoc, valueOne, SHADER_UNIFORM_INT);
+	
+	skybox.cubemap = LoadShader(TextFormat("shaders/cubemap.vs", GLSL_VERSION),
+								TextFormat("shaders/cubemap.fs", GLSL_VERSION));
+	int equiMapLoc = GetShaderLocation(skybox.cubemap, "equirectangularMap");
+	SetShaderValue(skybox.cubemap, equiMapLoc, valueZero, SHADER_UNIFORM_INT);
+
+	Texture2D panorama = LoadTexture("assets/hdr/krita_oilpaint-sunflowers_puresky_4k.hdr");
+
+	skybox.model.materials[0].maps[MATERIAL_MAP_CUBEMAP].texture = 
+		GenTextureCubemap(skybox.cubemap, panorama, 1024, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+	UnloadTexture(panorama);
+}
+
+void updateSkybox(Skybox& skybox) {
+	FilePathList droppedFiles = LoadDroppedFiles();
+	if (droppedFiles.count != 1) return;
+	if (!IsFileExtension(droppedFiles.paths[0], ".hdr")) return;
+	UnloadTexture(skybox.model.materials[0].maps[MATERIAL_MAP_CUBEMAP].texture);
+	Texture2D panorama = LoadTexture(droppedFiles.paths[0]);
+	skybox.model.materials[0].maps[MATERIAL_MAP_CUBEMAP].texture = 
+		GenTextureCubemap(skybox.cubemap, panorama, 1024, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+	UnloadTexture(panorama);
+	UnloadDroppedFiles(droppedFiles);
+}
+
+//********** Ground
+const int X_CELLS = 101;
+const int Z_CELLS = 101;
+const int BEGIN_CELL_POS = -50;
+const int END_CELL_POS = 50;
+
+Vector3 positionFromIndex(int i) {
+	int remainder = i % X_CELLS;
+	Vector3 v;
+	v.x = BEGIN_CELL_POS + remainder + 0.5f;
+	v.y = 0.5f;
+	v.z = BEGIN_CELL_POS + (float)(i - remainder) / X_CELLS + 0.5f;
+	return v;
+}
+
+int indexFromPosition(Vector3 v) {
+	float x = v.x - 0.5f;
+	float z = v.z - 0.5f;
+	int i = x - BEGIN_CELL_POS + (z - BEGIN_CELL_POS) * X_CELLS;
+	return i;
+}
+
+void indexesFromPosition(int index[2], Vector3 pos) {
+	index[0] = pos.x - 0.5 - BEGIN_CELL_POS;
+	index[1] = pos.y - 0.5 - BEGIN_CELL_POS;
+}
+
 struct Cell {
+	bool free;
 	Color color;
 };
 struct Ground {
-	Cell cells[NCELLS][NCELLS];
 	Mesh plane;
 	Model model;
-	Matrix *transforms;
 	Material material;
+
+	Matrix *transforms;
+	
+	int maxCellIndex;
+	Cell cells[X_CELLS][Z_CELLS];
 };
-Ground ground;
 
 Color getRandomColor()
 {
@@ -67,58 +140,35 @@ Color getRandomColor()
 	};
 }
 
-void initGround() {
+void initGround(Ground& ground) {
 	
 	ground.plane = GenMeshPlane(1.0f,1.0f,1,1);
 	ground.model = LoadModelFromMesh(ground.plane);
 	ground.model.materials[0].shader = shader;
     ground.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logoGround;
-	
-	
-	ground.transforms = (Matrix *)RL_CALLOC(NCELLS*NCELLS, sizeof(Matrix));
-    int i = 0;
-    for (int x = BEGIN_CELL_POS; x <= END_CELL_POS; x++) {
-        for (int z = BEGIN_CELL_POS; z <= END_CELL_POS; z++) {
-            ground.transforms[i] = MatrixTranslate(x + 0.5f, 0.0f, z + 0.5f);
-            i++;
-        }
-    }
-	
+
 	ground.material = LoadMaterialDefault();
 	ground.material.shader = shader;
 	ground.material.maps[MATERIAL_MAP_DIFFUSE].texture = logo;
 
-	
-	// test of colored ground
-	for (int x = 0; x < NCELLS; x++) {
-		for (int y = 0; y < NCELLS; y++) {
-			ground.cells[x][y].color = getRandomColor();
+	ground.transforms = (Matrix *)RL_CALLOC(X_CELLS*Z_CELLS, sizeof(Matrix));
+    int i=0;
+	for (int ix = 0, x = BEGIN_CELL_POS; ix < X_CELLS; ix++, x++) {
+		for (int iz = 0, z = BEGIN_CELL_POS; iz < Z_CELLS; iz++, z++) {
+			ground.transforms[i] = MatrixTranslate(x + 0.5f, 0.0f, z + 0.5f);
+			
+			ground.cells[ix][iz].free = true;
+			ground.cells[ix][iz].color = getRandomColor();
+			i++;
 		}
-	}
+	}	
 }
 
-class KeyDelay {
-public:
-    static constexpr float MinSpeed = 1.0f;
-    static constexpr float MaxSpeed = 10.0f;
-
-	// return interpolated speed taking Press/Release time as input
-    static float lerpSpeed(float time, float minTime, float maxTime) {
-        time = Clamp(time, minTime, maxTime);
-        return MinSpeed + (MaxSpeed - MinSpeed) * ((maxTime - time) / (maxTime - minTime));
-    }
-
-    static constexpr float MinPitch = 0.75f;
-    static constexpr float MaxPitch = 2.0f;    
-    static float lerpPitch(float time, float minTime, float maxTime) {
-        time = Clamp(time, minTime, maxTime);
-        return MinPitch + (MaxPitch - MinPitch) * ((maxTime - time) / (maxTime - minTime));
-    }
-    
-};
-
+//********** Cube
 struct Cube {
 	Model model;
+	int gIndex;
+	int xzIndex[2];
 	Vector3 position;
 	Vector3 nextPosition;
 	Vector3 direction;
@@ -147,6 +197,8 @@ void initCube() {
 
 	cube = {
 		.model = LoadModelFromMesh(GenMeshCube(1,1,1)),
+		.gIndex = indexFromPosition(cubeInitPos),
+		.xzIndex = { 0, 0 },
 		.position = cubeInitPos,
 		.nextPosition = cubeInitPos,
 		.direction = {-1.0f, 0.0f, 0.0f},
@@ -164,14 +216,16 @@ void initCube() {
 		.facesColor = WHITE,
 		.wiresColor = GREEN,
 
-		.rollWav = LoadSound("assets/roll.wav"),
+		.rollWav = LoadSound("assets/sounds/roll.wav"),
 		.pitchChange = 1.0f,
 	};
-	
+
+	indexesFromPosition(cube.xzIndex, cubeInitPos);
 	cube.model.materials[0].shader = shader;
     cube.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logo;
 }
 
+//********** Cube Camera
 struct CubeCamera {
 	Camera c3d;
 	float distance; // distance to target
@@ -222,17 +276,8 @@ void updateCamera(float delta) {
 
 }
 
-struct Mouse {
-	Vector2 position;
-	Vector2 prevPosition;
-	Vector2 deltaPosition;
-};
-Mouse mouse = {
-	.position = {0.0f, 0.0f},
-	.prevPosition = {0.0f, 0.0f},
-	.deltaPosition = {0.0f, 0.0f},
-};
 
+//********** Keyboard definitions
 struct Keyboard {
 	int pressedKey;
 	double keyPressTime;
@@ -261,6 +306,37 @@ Keyboard kb = {
 	.coloredGround = false,
 	.instancingEnabled = true,
 };
+class KeyDelay {
+public:
+    static constexpr float MinSpeed = 1.0f;
+    static constexpr float MaxSpeed = 10.0f;
+
+	// return interpolated speed taking Press/Release time as input
+    static float lerpSpeed(float time, float minTime, float maxTime) {
+        time = Clamp(time, minTime, maxTime);
+        return MinSpeed + (MaxSpeed - MinSpeed) * ((maxTime - time) / (maxTime - minTime));
+    }
+
+    static constexpr float MinPitch = 0.75f;
+    static constexpr float MaxPitch = 2.0f;    
+    static float lerpPitch(float time, float minTime, float maxTime) {
+        time = Clamp(time, minTime, maxTime);
+        return MinPitch + (MaxPitch - MinPitch) * ((maxTime - time) / (maxTime - minTime));
+    }
+    
+};
+
+//********** Mouse definitions & functions
+struct Mouse {
+	Vector2 position;
+	Vector2 prevPosition;
+	Vector2 deltaPosition;
+};
+Mouse mouse = {
+	.position = {0.0f, 0.0f},
+	.prevPosition = {0.0f, 0.0f},
+	.deltaPosition = {0.0f, 0.0f},
+};
 
 void mouseUpdateCameraAngles() {
 	mouse.deltaPosition = { 0.0f, 0.0f };
@@ -275,7 +351,7 @@ void mouseUpdateCameraAngles() {
 	// Update camera angles based on mouse movement
 	camera.angleX -= mouse.deltaPosition.x * 0.003f;
 	camera.angleY = camera.angleY + mouse.deltaPosition.y * 0.003f;
-	camera.angleY = Clamp(camera.angleY, 0.1f, PI/2 - 0.3f);
+	camera.angleY = Clamp(camera.angleY, -1.5*DEG2RAD, PI/2 - 0.3f);
 
 }
 
@@ -347,12 +423,16 @@ void drawAxis() {
     DrawCylinderEx((Vector3){0, 0, axisLength}, (Vector3){0, 0, axisLength + coneLength}, coneRadius, 0.0f, 8, BLUE);
 }
 
+//********** Cube movement
 void moveNegativeX() {
 	cube.moveStep = { -1.0f, 0.0f, 0.0f };
 	cube.rotationAxis = (Vector3){0.0f, 0.0f, 1.0f};
 	cube.rotationOrigin.x = cube.position.x - 0.5f; // Left edge
 	cube.rotationOrigin.y = cube.position.y - 0.5f; // Bottom edge
 	cube.rotationOrigin.z = cube.position.z;
+	
+	cube.xzIndex[0]--;
+	cube.gIndex--;
 }
 void movePositiveX() {
 	cube.moveStep = { 1.0f, 0.0f, 0.0f };
@@ -360,6 +440,9 @@ void movePositiveX() {
 	cube.rotationOrigin.x = cube.position.x + 0.5f; // Right edge
 	cube.rotationOrigin.y = cube.position.y - 0.5f; // Bottom edge
 	cube.rotationOrigin.z = cube.position.z;
+	
+	cube.xzIndex[0]++;
+	cube.gIndex++;
 }
 void moveNegativeZ() {
 	cube.moveStep = { 0.0f, 0.0f, -1.0f };
@@ -367,6 +450,9 @@ void moveNegativeZ() {
 	cube.rotationOrigin.x = cube.position.x;
 	cube.rotationOrigin.y = cube.position.y - 0.5f; // Bottom edge
 	cube.rotationOrigin.z = cube.position.z - 0.5f; // Front edge
+	
+	cube.xzIndex[1]--;
+	cube.gIndex = cube.gIndex - X_CELLS;
 }
 void movePositiveZ() {
 	cube.moveStep = { 0.0f, 0.0f, 1.0f };
@@ -374,8 +460,10 @@ void movePositiveZ() {
 	cube.rotationOrigin.x = cube.position.x;
 	cube.rotationOrigin.y = cube.position.y - 0.5f; // Bottom edge
 	cube.rotationOrigin.z = cube.position.z + 0.5f; // Back edge
+	
+	cube.xzIndex[1]++;
+	cube.gIndex = cube.gIndex + X_CELLS;
 }
-
 
 void calculateCubeMovement(int pressedKey) {
 	
@@ -467,6 +555,8 @@ void updateCubeMovement(float delta) {
 	}
 }
 
+
+//********** Keyboard management
 void handleKeyboard() {
 	if (IsKeyPressed(KEY_F1)) {
 		kb.cursorHidden = !kb.cursorHidden;
@@ -519,6 +609,8 @@ void handleKeyboard() {
 	}
 }
 
+
+//********** Drawing
 void drawRollingCube() {
 
 	if (cube.isMoving) {
@@ -541,11 +633,11 @@ void drawRollingCube() {
 	}
 }
 
-void drawColoredGround() {
+void drawColoredGround(Ground& ground) {
 	float fx = BEGIN_CELL_POS;
-	for (int x = 0; x < NCELLS; x++, fx++) {
+	for (int x = 0; x < X_CELLS; x++, fx++) {
 		float fz = BEGIN_CELL_POS;
-		for (int z = 0; z < NCELLS; z++, fz++) {
+		for (int z = 0; z < Z_CELLS; z++, fz++) {
 
 			DrawTriangle3D({fx, 0.0f, fz}, {fx, 0.0f, fz+1}, {fx+1, 0.0f, fz+1}, ground.cells[x][z].color);
 			DrawTriangle3D({fx+1, 0.0f, fz+1}, {fx+1, 0.0f, fz}, {fx, 0.0f, fz}, ground.cells[x][z].color);
@@ -553,6 +645,9 @@ void drawColoredGround() {
 		}
 	}
 }
+
+
+//********** Sound
 
 // Generate sine wave
 #define SAMPLE_RATE 44100  // Standard sample rate
@@ -577,6 +672,7 @@ void initWave() {
 }
 
 
+//********** Timers
 
 #include "timer.cpp"
 Timer activationLightTimer("3secsTimer");
@@ -615,13 +711,16 @@ void testLightMovement(float delta) {
 }
 
 
+//********** Lights
 void createLights() {
 	lights[0] = CreateLight(LIGHT_POINT, { -2.5f, 0.5f, -2.5f }, Vector3Zero(), YELLOW, shader);
 	lights[1] = CreateLight(LIGHT_POINT, { 0.5f, 0.5f, 0.5f }, { 0.0f, 0.0f, 0.0f }, RED, shader);
 	lights[2] = CreateLight(LIGHT_POINT, { -2.5f, 0.5f, 2.5f }, { 0.0f, 0.0f, 0.0f }, BLUE, shader);
 	lights[3] = CreateLight(LIGHT_POINT, { 2.5f, 0.5f, -2.5f }, { 0.0f, 0.0f, 0.0f }, GREEN, shader);
-	lights[4] = CreateLight(LIGHT_DIRECTIONAL, { -5.0f, 2.0f, 5.0f }, { 0.0f, 0.0f, 0.0f }, WHITE, shader);
-	lights[5] = CreateLight(LIGHT_DIRECTIONAL, { 5.0f, 2.0f, -3.0f }, { 0.0f, 0.0f, 0.0f }, { 144, 147, 98, 255}, shader);
+	lights[4] = CreateLight(LIGHT_DIRECTIONAL, { -5.0f, 2.0f, 5.0f }, { 0.0f, 0.0f, 0.0f }, 
+							{ 139,146,146,255 }, shader);
+	lights[5] = CreateLight(LIGHT_DIRECTIONAL, { 5.0f, 2.0f, -3.0f }, { 0.0f, 0.0f, 0.0f }, 
+							{ 144, 147, 98, 255 }, shader);
 	
 	TRACELOGD("sizeOf lights: %d", sizeof(lights)/sizeof(Light));
 	for (int i=0; i<MAX_LIGHTS; i++){
@@ -638,14 +737,33 @@ void createLights() {
 	lights[5].hidden = false;
 }
 
+void drawLights() {
+	// Draw spheres to show where the lights are
+	for (int i = 0; i < MAX_LIGHTS; i++)
+	{
+		if (lights[i].type == INACTIVE) continue;
+		if (lights[i].hidden == true) continue;
+
+		if (lights[i].enabled)  {
+			DrawSphereEx(lights[i].position, 0.2f, 8, 8, lights[i].color);
+		}
+		else { 
+			DrawSphereWires(lights[i].position, 0.2f, 8, 8, ColorAlpha(lights[i].color, 0.3f));
+		}
+			
+		if (lights[i].type == LIGHT_DIRECTIONAL) {
+			DrawLine3D(lights[i].position, lights[i].target, lights[i].color);
+			DrawSphereWires(lights[i].target, 0.021f, 4, 4, lights[i].color);
+		}
+	}
+}
 
 
 
 void imguiMenus();
 void drawText(int margin);
-
-
 Vector2 fullHD = { 1920, 1080 };
+//********** Main
 int main()
 {
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
@@ -654,6 +772,20 @@ int main()
 	SetWindowPosition(25, 50);
 
 	TRACELOGD("*** Started Cube! ***");
+	int i = 8; Vector3 v = positionFromIndex(i);
+	TRACELOGD("i: %i => pos: (%.1f, %.1f, %.1f)", i, v.x, v.y, v.z);
+	i = 15; v = positionFromIndex(i);
+	TRACELOGD("i: %i => pos: (%.1f, %.1f, %.1f)", i, v.x, v.y, v.z);
+	i = 22; v = positionFromIndex(i);
+	TRACELOGD("i: %i => pos: (%.1f, %.1f, %.1f)", i, v.x, v.y, v.z);
+	v = {1.5f, 0.5, -0.5f}; i = indexFromPosition(v);
+	TRACELOGD("pos: (%.1f, %.1f, %.1f) => i: %i",v.x, v.y, v.z, i);
+	v = {-1.5f, 0.5, 1.5f}; i = indexFromPosition(v);
+	TRACELOGD("pos: (%.1f, %.1f, %.1f) => i: %i",v.x, v.y, v.z, i);
+	v = {0.5f, 0.5, 2.5f}; i = indexFromPosition(v);
+	TRACELOGD("pos: (%.1f, %.1f, %.1f) => i: %i",v.x, v.y, v.z, i);
+	
+	
 	SetTargetFPS(60);
 	InitAudioDevice();
 	initWave();
@@ -665,8 +797,11 @@ int main()
 	loadShader();
 	loadTextures();
 	createLights();
+	Skybox skybox;
+	loadSkybox(skybox);
 
-	initGround();
+	Ground ground;
+	initGround(ground);
 	initCube();
 	initCamera();
 
@@ -700,12 +835,12 @@ int main()
 		float cameraPos[3] = { camera.c3d.position.x, camera.c3d.position.y, camera.c3d.position.z };
 		SetShaderValue(shader, shader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
 
-        if (IsKeyPressed(KEY_ONE))   { lights[0].enabled = !lights[0].enabled; }
-        if (IsKeyPressed(KEY_TWO))   { lights[1].enabled = !lights[1].enabled; }
-        if (IsKeyPressed(KEY_THREE)) { lights[2].enabled = !lights[2].enabled; }
-        if (IsKeyPressed(KEY_FOUR))  { lights[3].enabled = !lights[3].enabled; }
-        if (IsKeyPressed(KEY_FIVE))  { lights[4].enabled = !lights[4].enabled; }
-        if (IsKeyPressed(KEY_SIX))  { lights[4].enabled = !lights[5].enabled; }
+		if (IsKeyPressed(KEY_ONE))   { lights[0].enabled = !lights[0].enabled; }
+		if (IsKeyPressed(KEY_TWO))   { lights[1].enabled = !lights[1].enabled; }
+		if (IsKeyPressed(KEY_THREE)) { lights[2].enabled = !lights[2].enabled; }
+		if (IsKeyPressed(KEY_FOUR))  { lights[3].enabled = !lights[3].enabled; }
+		if (IsKeyPressed(KEY_FIVE))  { lights[4].enabled = !lights[4].enabled; }
+		if (IsKeyPressed(KEY_SIX))  { lights[4].enabled = !lights[5].enabled; }
 
 		SetShaderValue(shader, ambientLoc, &ambient, SHADER_UNIFORM_VEC4);
 		
@@ -715,28 +850,39 @@ int main()
 
 		testLightMovement(delta);
 		
+		if (IsFileDropped()) {
+			updateSkybox(skybox);
+		}
 		
 		BeginDrawing();
 		{
 			ClearBackground(BLACK);
+			// ClearBackground(RAYWHITE);
 
 			BeginMode3D(camera.c3d);
 			{
+		
+				
+				int timeLoc = GetShaderLocation(skybox.model.materials[0].shader, "time");
+				float elapsedTime = GetTime();
+				SetShaderValue(skybox.model.materials[0].shader, timeLoc, &elapsedTime, SHADER_UNIFORM_FLOAT);
+				
+				rlDisableBackfaceCulling();
+				rlDisableDepthMask();
+				DrawModel(skybox.model, Vector3Zero(), 1.0f, WHITE);
+				rlEnableBackfaceCulling();
+				rlEnableDepthMask();
+				
 				drawAxis();
-				// DrawSphere(camera.light.position, 0.2f, YELLOW);
-				// DrawSphereWires(camera.light.position, 0.21f, 16, 16, ORANGE);
 				DrawModel(cube.model, {3.5f, 0.25f, 3.5f}, 0.5f, RED);
 				
-				// BeginShaderMode(instanceShader);
-				// EndShaderMode();
-				
 				if (kb.coloredGround) {
-					drawColoredGround();
+					drawColoredGround(ground);
 				} else {
 					BeginShaderMode(shader);
 					instancing = 1;
 					SetShaderValue(shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
-					DrawMeshInstanced(ground.plane, ground.material, ground.transforms, NCELLS*NCELLS);
+					DrawMeshInstanced(ground.plane, ground.material, ground.transforms, X_CELLS*Z_CELLS);
 					EndShaderMode();
 				}
 				
@@ -753,25 +899,7 @@ int main()
 				drawRollingCube();
 				EndShaderMode();
 
-				// Draw spheres to show where the lights are
-				for (int i = 0; i < MAX_LIGHTS; i++)
-				{
-					if (lights[i].type == INACTIVE) continue;
-					if (lights[i].hidden == true) continue;
-
-					if (lights[i].enabled)  {
-						DrawSphereEx(lights[i].position, 0.2f, 8, 8, lights[i].color);
-					}
-					else { 
-						DrawSphereWires(lights[i].position, 0.2f, 8, 8, ColorAlpha(lights[i].color, 0.3f));
-					}
-			
-					if (lights[i].type == LIGHT_DIRECTIONAL) {
-						DrawLine3D(lights[i].position, lights[i].target, lights[i].color);
-						DrawSphereWires(lights[i].target, 0.021f, 4, 4, lights[i].color);
-					}
-				}
-
+				drawLights();
 
 			}
 			EndMode3D();
@@ -790,13 +918,20 @@ int main()
 	}
 	rlImGuiShutdown();
 
-	UnloadShader(shader);   // Unload shader
+	TRACELOGD("Ending program!");
+	
+	UnloadShader(shader);
+	UnloadShader(skybox.model.materials[0].shader);
+	UnloadTexture(skybox.model.materials[0].maps[MATERIAL_MAP_CUBEMAP].texture);
+	UnloadModel(skybox.model);
+	
 	UnloadSound(cube.rollWav);
 	CloseAudioDevice();
 	CloseWindow();
     return 0;
 }
 
+//********** ImGui & DrawText stuff
 ImVec4 RaylibColorToImVec4(Color col) {
     return ImVec4(
         col.r / 255.0f, // Red (0 to 1)
@@ -831,11 +966,17 @@ void imguiMenus() {
 	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.3f", cube.pitchChange);
 	ImGui::Spacing();
 	
-	ImGui::SeparatorText("Mouse");	
+	ImGui::SeparatorText("Mouse");
 	ImGui::End();
 
-	ImGui::Begin("Cube & models");
+	ImGui::Begin("Cube & Camera");
 	ImGui::SeparatorText("Cube");
+	ImGui::Text("gIndex:"); ImGui::SameLine(80);
+	ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%i", cube.gIndex);
+	ImGui::Text("index:"); ImGui::SameLine(80); ImGui::Text("ix="); ImGui::SameLine(120);
+	ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%i", cube.xzIndex[0]);
+	ImGui::SameLine(200); ImGui::Text("iz="); ImGui::SameLine(240);
+	ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%i", cube.xzIndex[1]);
 	ImGui::DragFloat3("position", (float *)&cube.position, 1.0f, -1000.0f, 1000.0f);
 	ImGui::DragFloat3("next position", (float *)&cube.nextPosition, 1.0f, -1000.0f, 1000.0f);
 	ImGui::DragFloat3("direction", (float *)&cube.direction, 1.0f, -1000.0f, 1000.0f);
