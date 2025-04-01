@@ -223,7 +223,7 @@ void initCube() {
 	};
 		
 	indexesFromPosition(cube.pIndex, cubeInitPos);
-	// cube.model.materials[0].shader = shader;
+	cube.model.materials[0].shader = shader;
     cube.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logo;
 }
 
@@ -290,8 +290,9 @@ struct Keyboard {
 	bool hasQueuedKey;
 	int queuedKey;
 	bool shiftPressed;
-	
+
 	bool cursorHidden;
+	bool drawAxis;
 	bool coloredGround;
 	bool instancingEnabled;
 };
@@ -307,6 +308,7 @@ Keyboard kb = {
 	.shiftPressed = false,
 	
     .cursorHidden = false,
+	.drawAxis = false,
 	.coloredGround = false,
 	.instancingEnabled = true,
 };
@@ -676,13 +678,6 @@ void drawColoredGround(Ground& ground) {
 // Generate sine wave
 #define SAMPLE_RATE 44100  // Standard sample rate
 #define SAMPLES 5500    // 1 second of audio
-#define FREQUENCY 440.0f   // A4 note (440 Hz)
-
-// 220 Hz (A2)
-// 246.94 Hz (B2)
-// 277.18 Hz (C#3)
-// 329.63 Hz (E3)
-// 369.99 Hz (F#3)
 
 Wave wave = {
 	.frameCount = SAMPLES,
@@ -691,22 +686,24 @@ Wave wave = {
 	.channels = 1,	  // Mono sound
 	.data = 0
 };
-Sound waveSound;
+
+float frequency[5] = { 220, 246.94, 277.18, 329.63, 369.99 };
+Sound waveSound[5] = {};
 void initWave() {
 	short* data = (short*)MemAlloc(SAMPLES * sizeof(short)); // Allocate buffer
     
-	
-	for (int i = 0; i < SAMPLES; i++) {
-        float t = (float)i / SAMPLE_RATE; // Time
-        data[i] = (short)(sinf(2.0f * PI * FREQUENCY * t) * 32000); // Sine wave
-    }
-	wave.data = data;
-	waveSound = LoadSoundFromWave(wave);
+	for (int i=0; i<5; i++) {
+		for (int s = 0; s < SAMPLES; s++) {
+			float t = (float)s / SAMPLE_RATE; // Time
+			data[s] = (short)(sinf(2.0f * PI * frequency[i] * t) * 32000); // Sine wave
+		}
+		wave.data = data;
+		waveSound[i] = LoadSoundFromWave(wave);
+	}
 }
 
 
 //********** Timers
-
 #include "timer.cpp"
 Timer activationLightTimer("3secsTimer");
 Timer moveTimer("MoveTimer");
@@ -725,7 +722,7 @@ void testLightMovement(float delta) {
 		lights[1].position.x = -5.5f;
 		lights[1].enabled = true;
 		moveTimer.start(0.5f);
-		PlaySound(waveSound);
+		PlaySound(waveSound[0]);
 	}
 
 	moveTimer.update(delta);
@@ -742,7 +739,7 @@ void testLightMovement(float delta) {
 		spawnDirUp = true;
 		return;
 	}
-	PlaySound(waveSound);
+	PlaySound(waveSound[countTimer]);
 	lights[1].position.x += 1.0f;
 	moveTimer.start();
 }
@@ -799,8 +796,6 @@ void createLights() {
 	}
 	lights[4].enabled = true;
 	lights[5].enabled = true;
-	lights[4].hidden = false;
-	lights[5].hidden = false;
 }
 
 void drawLights() {
@@ -933,7 +928,9 @@ int main()
 				rlEnableBackfaceCulling();
 				rlEnableDepthMask();
 				
-				drawAxis();
+				if (kb.drawAxis) {
+					drawAxis();
+				}
 								
 				if (kb.coloredGround) {
 					drawColoredGround(ground);
@@ -1093,6 +1090,7 @@ void imguiMenus() {
 	ImGui::Spacing();
 
 	ImGui::SeparatorText("Camera");
+	ImGui::Checkbox("drawAxis", &kb.drawAxis);	
 	ImGui::DragFloat3("position ", (float *)&camera.c3d.position, 1.0f, -1000.0f, 1000.0f);
 	ImGui::DragFloat3("target ", (float *)&camera.c3d.target, 1.0f, -1000.0f, 1000.0f);
 	float camAngleX = camera.angleX * RAD2DEG;
@@ -1106,24 +1104,29 @@ void imguiMenus() {
 	ImGui::SeparatorText("Lights");
 	ImGui::ColorEdit4("ambient", &ambient.x);
 	ImGui::Text("lightsCount:"); ImGui::SameLine(180);
-	ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%i", lightsCount);
+	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%i", lightsCount);
 	ImVec4 lightColor[6];
 	for (int i=0; i<=5; i++) {
-		const char* posStr = TextFormat("position %i", i);
-		const char* colorStr = TextFormat("color %i", i);
 		const char* type = (lights[i].type == LIGHT_POINT ? "Point" : "Directional");
-		const char* enabledStr = TextFormat("Light %i %s", i, type);
-		ImGui::Checkbox(enabledStr, &lights[i].enabled);
-		ImGui::DragFloat3(posStr, (float *)&lights[i].position, 0.5f, -20.0f, 20.0f);
-		lightColor[i] = RaylibColorToImVec4(lights[i].color);
-		if (ImGui::ColorEdit4(colorStr, &lightColor[i].x)) {
-			lights[i].color = ImVec4ToRaylibColor(lightColor[i]);
+		const char* lightName = TextFormat("Light %i - %s", i, type);
+		if (ImGui::CollapsingHeader( lightName)) {
+			const char* posStr = TextFormat("position##%i", i);
+			const char* colorStr = TextFormat("color##%i", i);
+			const char* enableStr = TextFormat("enable##%i", i);
+			const char* hiddenStr = TextFormat("hidden##%i", i);
+			ImGui::Checkbox(enableStr, &lights[i].enabled);ImGui::SameLine(140);
+			ImGui::Checkbox(hiddenStr, &lights[i].hidden);
+			ImGui::DragFloat3(posStr, (float *)&lights[i].position, 0.5f, -20.0f, 20.0f);
+			lightColor[i] = RaylibColorToImVec4(lights[i].color);
+			if (ImGui::ColorEdit4(colorStr, &lightColor[i].x)) {
+				lights[i].color = ImVec4ToRaylibColor(lightColor[i]);
+			}
+			if (lights[i].type == LIGHT_DIRECTIONAL) {
+				const char* targetStr = TextFormat("target##%i", i);
+				ImGui::DragFloat3(targetStr, (float *)&lights[i].target, 0.5f, -100.0f, 100.0f);
+			}
+			ImGui::Spacing();
 		}
-		if (lights[i].type == LIGHT_DIRECTIONAL) {
-			const char* targetStr = TextFormat("target %i", i);
-			ImGui::DragFloat3(targetStr, (float *)&lights[i].target, 0.5f, -100.0f, 100.0f);
-		}
-		ImGui::Spacing();
 	}
 
 // ImGui::Checkbox("isEmpty light", &camera.freeLight);        
