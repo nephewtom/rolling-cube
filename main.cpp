@@ -150,7 +150,7 @@ struct IndexPos {
 };
 void indexesFromPosition(IndexPos& index, Vector3 pos) {
 	index.x = pos.x - 0.5 - BEGIN_CELL_POS;
-	index.z = pos.y - 0.5 - BEGIN_CELL_POS;
+	index.z = pos.z - 0.5 - BEGIN_CELL_POS;
 }
 
 Vector3 positionFromIndexes(IndexPos& index) {
@@ -286,7 +286,8 @@ struct Keyboard {
 		
 	bool hasQueuedKey;
 	int queuedKey;
-
+	bool shiftPressed;
+	
 	bool cursorHidden;
 	bool coloredGround;
 	bool instancingEnabled;
@@ -300,7 +301,8 @@ Keyboard kb = {
 
     .hasQueuedKey = false,
     .queuedKey = 0,
-
+	.shiftPressed = false,
+	
     .cursorHidden = false,
 	.coloredGround = false,
 	.instancingEnabled = true,
@@ -401,6 +403,8 @@ void handleMouseWheel() {
         camera.distance = fmax(MIN_CAMERA_DISTANCE, fmin(camera.distance, MAX_CAMERA_DISTANCE));
     }
 }
+
+
 
 // Define axis parameters
 const float axisLength = 2.0f;  // Length of each axis
@@ -553,15 +557,16 @@ void updateCubeMovement(float delta) {
 		PlaySound(cube.rollWav);
 		                
 		cube.position = cube.nextPosition;
-		cube.isMoving = false;
 		cube.animationProgress = 0.0f;
 		cube.rotationAngle = 0.0f;
+		cube.isMoving = false;
+
 	}
 }
 
-
 //********** Keyboard management
 void handleKeyboard() {
+	
 	if (IsKeyPressed(KEY_F1)) {
 		kb.cursorHidden = !kb.cursorHidden;
 		if (kb.cursorHidden)
@@ -573,6 +578,9 @@ void handleKeyboard() {
 	if (IsKeyPressed(KEY_F5)) { kb.coloredGround = !kb.coloredGround; }
 	if (IsKeyPressed(KEY_F11)) { ToggleFullscreen(); }
 
+	
+	kb.shiftPressed = IsKeyDown(kb.pressedKey) && (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT));
+	
 	int releasedKey =
 		IsKeyReleased(KEY_W) ? KEY_W :
 		IsKeyReleased(KEY_S) ? KEY_S :
@@ -584,7 +592,8 @@ void handleKeyboard() {
 		kb.pressReleaseTime = kb.keyReleaseTime - kb.keyPressTime;
 		float t = kb.pressReleaseTime;
 		
-		cube.animationSpeed = KeyDelay::lerpSpeed(t, 0.01f, 0.5f);
+		if (!kb.shiftPressed)
+			cube.animationSpeed = KeyDelay::lerpSpeed(t, 0.01f, 0.5f);
 	}
 		
 	int pressedKey =
@@ -596,17 +605,25 @@ void handleKeyboard() {
 	// cube.animationSpeed = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)
 	// 	? fastSpeed : normalSpeed;
 
+	if (kb.shiftPressed) {
+		if (pressedKey == 0)
+			pressedKey = kb.pressedKey;
+	} 
+
 	if (pressedKey) {
+		
 		kb.pressedKey = pressedKey;
 		kb.keyPressTime = GetTime();
 
 		float t = kb.keyPressTime - kb.keyReleaseTime;
 		// Different than before (pressed after released)                 
-		cube.animationSpeed = KeyDelay::lerpSpeed(t, 0.01f, 0.5f);
+		if (!kb.shiftPressed)
+			cube.animationSpeed = KeyDelay::lerpSpeed(t, 0.01f, 0.5f);
 
-		if (!cube.isMoving) { // First time is pressed
+		if (!cube.isMoving) { // pressed after a stop
 			calculateCubeMovement(pressedKey);
-		} else {
+		}
+		else if (!kb.shiftPressed){
 			kb.hasQueuedKey = true;
 			kb.queuedKey = pressedKey;
 		}
@@ -743,7 +760,7 @@ void updateSpawnedCube(float delta) {
 		} else {
 			spawnCube = false;
 			elapsedTime = 0.0f;
-			spawnDirUp - true;
+			spawnDirUp = true;
 		}
 	}
 }
@@ -850,10 +867,14 @@ int main()
 
 		if (cube.isMoving) {
 			updateCubeMovement(delta);
-		} else if (kb.hasQueuedKey) {
+
+		} 
+		else if (kb.hasQueuedKey) {
 			calculateCubeMovement(kb.queuedKey);
 			updateCubeMovement(delta);
-			kb.hasQueuedKey = false;
+			
+			if (!kb.shiftPressed)
+				kb.hasQueuedKey = false;
 		}
 
 		updateCamera(delta);
@@ -862,12 +883,6 @@ int main()
 		float cameraPos[3] = { camera.c3d.position.x, camera.c3d.position.y, camera.c3d.position.z };
 		SetShaderValue(shader, shader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
 
-		if (IsKeyPressed(KEY_ONE))   { lights[0].enabled = !lights[0].enabled; }
-		if (IsKeyPressed(KEY_TWO))   { lights[1].enabled = !lights[1].enabled; }
-		if (IsKeyPressed(KEY_THREE)) { lights[2].enabled = !lights[2].enabled; }
-		if (IsKeyPressed(KEY_FOUR))  { lights[3].enabled = !lights[3].enabled; }
-		if (IsKeyPressed(KEY_FIVE))  { lights[4].enabled = !lights[4].enabled; }
-		if (IsKeyPressed(KEY_SIX))  { lights[4].enabled = !lights[5].enabled; }
 
 		SetShaderValue(shader, ambientLoc, &ambient, SHADER_UNIFORM_VEC4);
 		
@@ -967,6 +982,27 @@ int main()
     return 0;
 }
 
+
+Vector3 GetMouseXZPosition() {
+    Ray mouseRay = GetMouseRay(GetMousePosition(), camera.c3d);
+
+    // Plane is at y = 0
+    float planeY = 0.0f;
+
+    // Ray formula: P = origin + t * direction
+    float t = (planeY - mouseRay.position.y) / mouseRay.direction.y;
+
+    if (t > 0) { // Ensure ray is pointing downward
+        return (Vector3) {
+            mouseRay.position.x + t * mouseRay.direction.x,
+            planeY,  // Always on XZ plane
+            mouseRay.position.z + t * mouseRay.direction.z
+        };
+    }
+
+    return (Vector3) { 0.0f, 0.0f, 0.0f }; // Default if no intersection
+}
+
 //********** ImGui & DrawText stuff
 ImVec4 RaylibColorToImVec4(Color col) {
     return ImVec4(
@@ -993,6 +1029,13 @@ void imguiMenus() {
 
 	ImGui::SeparatorText("Keyboard");
 	ImGui::Checkbox("Colored Ground plane (F6)", &kb.coloredGround);
+	bool isShiftDown = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT));
+	ImGui::Checkbox("IsShiftDown", &isShiftDown);
+	// ImGui::Text("pressedKey: ");  ImGui::SameLine(180); 
+	// ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%i", pressedKey);
+	ImGui::Text("kb.pressedKey: ");  ImGui::SameLine(180); 
+	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%i", kb.pressedKey);
+	ImGui::Checkbox("hasQueuedKey", &kb.hasQueuedKey);
 	ImGui::Spacing();
 	ImGui::Text("Press/Release time:"); ImGui::SameLine(180);
 	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.3f", kb.pressReleaseTime);
@@ -1003,14 +1046,20 @@ void imguiMenus() {
 	ImGui::Spacing();
 	
 	ImGui::SeparatorText("Mouse");
+	
+	IndexPos xzIndex;
+	Vector3 xzPos = GetMouseXZPosition();
+	ImGui::Text("xz position: (%0.2f, %0.2f)", xzPos.x, xzPos.z);
+	indexesFromPosition(xzIndex, Vector3Add({ 0.5f, 0.0f, 0.5f}, xzPos));
+	ImGui::Text("xz Index: (%i, %i)", xzIndex.x, xzIndex.z);
+
 	ImGui::End();
 
 	ImGui::Begin("Cube & Camera");
 	ImGui::SeparatorText("Cube");
-	ImGui::Text("pIndex:"); ImGui::SameLine(80); ImGui::Text("x="); ImGui::SameLine(120);
-	ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%i", cube.pIndex.x);
-	ImGui::SameLine(200); ImGui::Text("z="); ImGui::SameLine(240);
-	ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%i", cube.pIndex.z);
+	ImGui::Checkbox("isMoving", &cube.isMoving);
+	ImGui::Text("pIndex (ix, iz):"); ImGui::SameLine(140);
+	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "(%i, %i)", cube.pIndex.x, cube.pIndex.z);
 	ImGui::DragFloat3("position", (float *)&cube.position, 1.0f, -1000.0f, 1000.0f);
 	ImGui::DragFloat3("next position", (float *)&cube.nextPosition, 1.0f, -1000.0f, 1000.0f);
 	ImGui::DragFloat3("direction", (float *)&cube.direction, 1.0f, -1000.0f, 1000.0f);
@@ -1047,7 +1096,7 @@ void imguiMenus() {
 		const char* colorStr = TextFormat("color %i", i);
 		const char* type = (lights[i].type == LIGHT_POINT ? "Point" : "Directional");
 		const char* enabledStr = TextFormat("Light %i %s", i, type);
-	    ImGui::Checkbox(enabledStr, &lights[i].enabled);
+		ImGui::Checkbox(enabledStr, &lights[i].enabled);
 		ImGui::DragFloat3(posStr, (float *)&lights[i].position, 0.5f, -20.0f, 20.0f);
 		lightColor[i] = RaylibColorToImVec4(lights[i].color);
 		if (ImGui::ColorEdit4(colorStr, &lightColor[i].x)) {
@@ -1060,13 +1109,13 @@ void imguiMenus() {
 		ImGui::Spacing();
 	}
 
-    // ImGui::Checkbox("isEmpty light", &camera.freeLight);        
-	// ImGui::DragFloat3("position  ", (float *)&camera.light.position, 0.2f, -1000.0f, 1000.0f);
-	// ImGui::DragFloat3("target  ", (float *)&camera.light.target, 0.2f, -1000.0f, 1000.0f);
-	// ImVec4 lightColor = RaylibColorToImVec4(camera.light.color);
-	// if (ImGui::ColorEdit4("color", &lightColor.x)) {
-	// 	camera.light.color = ImVec4ToRaylibColor(lightColor);
-	// }
+// ImGui::Checkbox("isEmpty light", &camera.freeLight);        
+// ImGui::DragFloat3("position  ", (float *)&camera.light.position, 0.2f, -1000.0f, 1000.0f);
+// ImGui::DragFloat3("target  ", (float *)&camera.light.target, 0.2f, -1000.0f, 1000.0f);
+// ImVec4 lightColor = RaylibColorToImVec4(camera.light.color);
+// if (ImGui::ColorEdit4("color", &lightColor.x)) {
+// 	camera.light.color = ImVec4ToRaylibColor(lightColor);
+// }
 
 	ImGui::End();
 
