@@ -1,4 +1,5 @@
 #include "raylib.h"
+#include <cstddef>
 #define SUPPORT_TRACELOG
 #define SUPPORT_TRACELOG_DEBUG
 #include "utils.h"
@@ -96,6 +97,7 @@ const int END_CELL_POS = 50;
 
 struct Cell {
 	bool isEmpty;
+	int obstacleId;
 	Color color;
 };
 struct Ground {
@@ -138,16 +140,23 @@ void initGround() {
 			ground.transforms[i] = MatrixTranslate(xCoord + 0.5f, 0.0f, zCoord + 0.5f);
 			
 			ground.cells[ix][iz].isEmpty = true;
+			ground.cells[ix][iz].obstacleId = -1;
 			ground.cells[ix][iz].color = getRandomColor();
 			i++;
 		}
 	}	
 }
 
-struct IndexPos {
-	int x;
-	int z;
+#include "obstacles.cpp"
+struct Obstacles {
+	IndexPos indexPos[10];
 };
+
+
+
+ObstaclePool obstaclePool;
+
+
 void indexesFromPosition(IndexPos& index, Vector3 pos) {
 	index.x = pos.x - 0.5 - BEGIN_CELL_POS;
 	index.z = pos.z - 0.5 - BEGIN_CELL_POS;
@@ -269,12 +278,6 @@ void updateCamera(float delta) {
 
 }
 
-struct Obstacles {
-	IndexPos indexPos[5];
-};
-Obstacles obstacles = {
-	.indexPos = { { 53, 53 }, { 48, 48 }, { 53, 48 }, {50,51}, {52,49} }
-};
 
 //********** Keyboard definitions
 struct Keyboard {
@@ -673,7 +676,14 @@ void drawColoredGround(Ground& ground) {
 // Generate sine wave
 #define SAMPLE_RATE 44100  // Standard sample rate
 #define SAMPLES 5500    // 1 second of audio
-#define FREQUENCY 220.0f   // A4 note (440 Hz)
+#define FREQUENCY 440.0f   // A4 note (440 Hz)
+
+// 220 Hz (A2)
+// 246.94 Hz (B2)
+// 277.18 Hz (C#3)
+// 329.63 Hz (E3)
+// 369.99 Hz (F#3)
+
 Wave wave = {
 	.frameCount = SAMPLES,
 	.sampleRate = 44100, 
@@ -684,7 +694,9 @@ Wave wave = {
 Sound waveSound;
 void initWave() {
 	short* data = (short*)MemAlloc(SAMPLES * sizeof(short)); // Allocate buffer
-    for (int i = 0; i < SAMPLES; i++) {
+    
+	
+	for (int i = 0; i < SAMPLES; i++) {
         float t = (float)i / SAMPLE_RATE; // Time
         data[i] = (short)(sinf(2.0f * PI * FREQUENCY * t) * 32000); // Sine wave
     }
@@ -850,8 +862,13 @@ int main()
 	SetShaderValue(shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
 
 
-	for (IndexPos idx : obstacles.indexPos) {
+	// Obstacles
+	obstaclePool.init(100);
+	
+	IndexPos obstacles[10] = { { 53, 53 }, { 48, 48 }, { 53, 48 }, {50,51}, {52,49} };
+	for (IndexPos idx : obstacles) {
 		ground.cells[idx.x][idx.z].isEmpty = false;
+		ground.cells[idx.x][idx.z].obstacleId = 1; // TODO: assign the obstacleId
 	}
 	
 	activationLightTimer.start(3.0f);
@@ -941,7 +958,7 @@ int main()
 				drawRollingCube();
 				EndShaderMode();
 
-				for (IndexPos idx : obstacles.indexPos) {
+				for (IndexPos idx : obstacles) {
 					Vector3 v = positionFromIndexes(idx);
 					DrawModel(cube.model, v, 1.0f, RED);
 				}
