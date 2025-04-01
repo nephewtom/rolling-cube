@@ -94,29 +94,8 @@ const int Z_CELLS = 101;
 const int BEGIN_CELL_POS = -50;
 const int END_CELL_POS = 50;
 
-Vector3 positionFromIndex(int i) {
-	int remainder = i % X_CELLS;
-	Vector3 v;
-	v.x = BEGIN_CELL_POS + remainder + 0.5f;
-	v.y = 0.5f;
-	v.z = BEGIN_CELL_POS + (float)(i - remainder) / X_CELLS + 0.5f;
-	return v;
-}
-
-int indexFromPosition(Vector3 v) {
-	float x = v.x - 0.5f;
-	float z = v.z - 0.5f;
-	int i = x - BEGIN_CELL_POS + (z - BEGIN_CELL_POS) * X_CELLS;
-	return i;
-}
-
-void indexesFromPosition(int index[2], Vector3 pos) {
-	index[0] = pos.x - 0.5 - BEGIN_CELL_POS;
-	index[1] = pos.y - 0.5 - BEGIN_CELL_POS;
-}
-
 struct Cell {
-	bool free;
+	bool isEmpty;
 	Color color;
 };
 struct Ground {
@@ -129,6 +108,7 @@ struct Ground {
 	int maxCellIndex;
 	Cell cells[X_CELLS][Z_CELLS];
 };
+Ground ground;
 
 Color getRandomColor()
 {
@@ -140,7 +120,7 @@ Color getRandomColor()
 	};
 }
 
-void initGround(Ground& ground) {
+void initGround() {
 	
 	ground.plane = GenMeshPlane(1.0f,1.0f,1,1);
 	ground.model = LoadModelFromMesh(ground.plane);
@@ -153,22 +133,34 @@ void initGround(Ground& ground) {
 
 	ground.transforms = (Matrix *)RL_CALLOC(X_CELLS*Z_CELLS, sizeof(Matrix));
     int i=0;
-	for (int ix = 0, x = BEGIN_CELL_POS; ix < X_CELLS; ix++, x++) {
-		for (int iz = 0, z = BEGIN_CELL_POS; iz < Z_CELLS; iz++, z++) {
-			ground.transforms[i] = MatrixTranslate(x + 0.5f, 0.0f, z + 0.5f);
+	for (int ix = 0, xCoord = BEGIN_CELL_POS; ix < X_CELLS; ix++, xCoord++) {
+		for (int iz = 0, zCoord = BEGIN_CELL_POS; iz < Z_CELLS; iz++, zCoord++) {
+			ground.transforms[i] = MatrixTranslate(xCoord + 0.5f, 0.0f, zCoord + 0.5f);
 			
-			ground.cells[ix][iz].free = true;
+			ground.cells[ix][iz].isEmpty = true;
 			ground.cells[ix][iz].color = getRandomColor();
 			i++;
 		}
 	}	
 }
 
+struct IndexPos {
+	int x;
+	int z;
+};
+void indexesFromPosition(IndexPos& index, Vector3 pos) {
+	index.x = pos.x - 0.5 - BEGIN_CELL_POS;
+	index.z = pos.y - 0.5 - BEGIN_CELL_POS;
+}
+
+Vector3 positionFromIndexes(IndexPos& index) {
+	return { BEGIN_CELL_POS + index.x + 0.5f, 0.5f, BEGIN_CELL_POS + index.z + 0.5f };
+}
+
 //********** Cube
 struct Cube {
 	Model model;
-	int gIndex;
-	int xzIndex[2];
+	IndexPos pIndex;
 	Vector3 position;
 	Vector3 nextPosition;
 	Vector3 direction;
@@ -188,6 +180,7 @@ struct Cube {
 
 	Sound rollWav;
 	float pitchChange;
+	Sound collision;
 };
 Cube cube;
 
@@ -197,8 +190,7 @@ void initCube() {
 
 	cube = {
 		.model = LoadModelFromMesh(GenMeshCube(1,1,1)),
-		.gIndex = indexFromPosition(cubeInitPos),
-		.xzIndex = { 0, 0 },
+		.pIndex = {},
 		.position = cubeInitPos,
 		.nextPosition = cubeInitPos,
 		.direction = {-1.0f, 0.0f, 0.0f},
@@ -218,10 +210,11 @@ void initCube() {
 
 		.rollWav = LoadSound("assets/sounds/roll.wav"),
 		.pitchChange = 1.0f,
+		.collision = LoadSound("assets/sounds/collision.wav"),
 	};
-
-	indexesFromPosition(cube.xzIndex, cubeInitPos);
-	cube.model.materials[0].shader = shader;
+		
+	indexesFromPosition(cube.pIndex, cubeInitPos);
+	// cube.model.materials[0].shader = shader;
     cube.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logo;
 }
 
@@ -276,6 +269,12 @@ void updateCamera(float delta) {
 
 }
 
+struct Obstacles {
+	IndexPos indexPos[5];
+};
+Obstacles obstacles = {
+	.indexPos = { { 53, 53 }, { 48, 48 }, { 53, 48 }, {50,51}, {52,49} }
+};
 
 //********** Keyboard definitions
 struct Keyboard {
@@ -430,9 +429,6 @@ void moveNegativeX() {
 	cube.rotationOrigin.x = cube.position.x - 0.5f; // Left edge
 	cube.rotationOrigin.y = cube.position.y - 0.5f; // Bottom edge
 	cube.rotationOrigin.z = cube.position.z;
-	
-	cube.xzIndex[0]--;
-	cube.gIndex--;
 }
 void movePositiveX() {
 	cube.moveStep = { 1.0f, 0.0f, 0.0f };
@@ -440,9 +436,6 @@ void movePositiveX() {
 	cube.rotationOrigin.x = cube.position.x + 0.5f; // Right edge
 	cube.rotationOrigin.y = cube.position.y - 0.5f; // Bottom edge
 	cube.rotationOrigin.z = cube.position.z;
-	
-	cube.xzIndex[0]++;
-	cube.gIndex++;
 }
 void moveNegativeZ() {
 	cube.moveStep = { 0.0f, 0.0f, -1.0f };
@@ -450,9 +443,6 @@ void moveNegativeZ() {
 	cube.rotationOrigin.x = cube.position.x;
 	cube.rotationOrigin.y = cube.position.y - 0.5f; // Bottom edge
 	cube.rotationOrigin.z = cube.position.z - 0.5f; // Front edge
-	
-	cube.xzIndex[1]--;
-	cube.gIndex = cube.gIndex - X_CELLS;
 }
 void movePositiveZ() {
 	cube.moveStep = { 0.0f, 0.0f, 1.0f };
@@ -460,9 +450,18 @@ void movePositiveZ() {
 	cube.rotationOrigin.x = cube.position.x;
 	cube.rotationOrigin.y = cube.position.y - 0.5f; // Bottom edge
 	cube.rotationOrigin.z = cube.position.z + 0.5f; // Back edge
-	
-	cube.xzIndex[1]++;
-	cube.gIndex = cube.gIndex + X_CELLS;
+}
+
+bool hasCollision() {
+	int xi = (int)cube.moveStep.x;
+	int zi = (int)cube.moveStep.z;
+	bool isEmpty =  ground.cells[cube.pIndex.x + xi][cube.pIndex.z + zi].isEmpty;
+	if (isEmpty) {
+		cube.pIndex.x += xi;
+		cube.pIndex.z += zi;
+		return false;
+	} 
+	return true;
 }
 
 void calculateCubeMovement(int pressedKey) {
@@ -510,6 +509,11 @@ void calculateCubeMovement(int pressedKey) {
 		}
 	}
 
+	if (hasCollision()) {
+		PlaySound(cube.collision);
+		return;
+	}
+	
 	cube.nextPosition.x = cube.position.x + cube.moveStep.x;
 	cube.nextPosition.y = cube.position.y + cube.moveStep.y;
 	cube.nextPosition.z = cube.position.z + cube.moveStep.z;
@@ -679,6 +683,8 @@ Timer activationLightTimer("3secsTimer");
 Timer moveTimer("MoveTimer");
 int countTimer = 0;
 
+bool spawnCube = false;
+bool spawnDirUp = true;
 Light lights[MAX_LIGHTS];
 void testLightMovement(float delta) {
 
@@ -703,6 +709,8 @@ void testLightMovement(float delta) {
 		lights[1].enabled = false;
 		countTimer = 0;
 		activationLightTimer.start(3.0f);
+		spawnCube = true;
+		spawnDirUp = true;
 		return;
 	}
 	PlaySound(waveSound);
@@ -710,6 +718,35 @@ void testLightMovement(float delta) {
 	moveTimer.start();
 }
 
+float EaseInOut(float t) {
+    return t * t * (3.0f - 2.0f * t); // Smoothstep function
+}
+
+float elapsedTime = 0.0f;
+Vector3 spawnPos = { -1.5f, -0.5f, 0.5f };
+void updateSpawnedCube(float delta) {
+    if (elapsedTime < 1.0f) { //secs
+		// float t = elapsedTime / duration; // Normalize time [0,1]
+        // cubePosition.y = startY + t * (endY - startY); // Lerp formula
+		float t = elapsedTime / 1.0f;
+		
+		if (spawnDirUp == true)
+			spawnPos.y = -1.0f + EaseInOut(t) * (3.0f + 1.0f);
+		else 
+			spawnPos.y = 3.0f + EaseInOut(t) * (-1.0f - 3.0f);
+
+		elapsedTime += delta;
+    } else {
+		if (spawnDirUp) {
+			spawnDirUp = false;
+			elapsedTime = 0.0f;
+		} else {
+			spawnCube = false;
+			elapsedTime = 0.0f;
+			spawnDirUp - true;
+		}
+	}
+}
 
 //********** Lights
 void createLights() {
@@ -772,19 +809,6 @@ int main()
 	SetWindowPosition(25, 50);
 
 	TRACELOGD("*** Started Cube! ***");
-	int i = 8; Vector3 v = positionFromIndex(i);
-	TRACELOGD("i: %i => pos: (%.1f, %.1f, %.1f)", i, v.x, v.y, v.z);
-	i = 15; v = positionFromIndex(i);
-	TRACELOGD("i: %i => pos: (%.1f, %.1f, %.1f)", i, v.x, v.y, v.z);
-	i = 22; v = positionFromIndex(i);
-	TRACELOGD("i: %i => pos: (%.1f, %.1f, %.1f)", i, v.x, v.y, v.z);
-	v = {1.5f, 0.5, -0.5f}; i = indexFromPosition(v);
-	TRACELOGD("pos: (%.1f, %.1f, %.1f) => i: %i",v.x, v.y, v.z, i);
-	v = {-1.5f, 0.5, 1.5f}; i = indexFromPosition(v);
-	TRACELOGD("pos: (%.1f, %.1f, %.1f) => i: %i",v.x, v.y, v.z, i);
-	v = {0.5f, 0.5, 2.5f}; i = indexFromPosition(v);
-	TRACELOGD("pos: (%.1f, %.1f, %.1f) => i: %i",v.x, v.y, v.z, i);
-	
 	
 	SetTargetFPS(60);
 	InitAudioDevice();
@@ -800,8 +824,7 @@ int main()
 	Skybox skybox;
 	loadSkybox(skybox);
 
-	Ground ground;
-	initGround(ground);
+	initGround();
 	initCube();
 	initCamera();
 
@@ -810,6 +833,10 @@ int main()
 	SetShaderValue(shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
 
 
+	for (IndexPos idx : obstacles.indexPos) {
+		ground.cells[idx.x][idx.z].isEmpty = false;
+	}
+	
 	activationLightTimer.start(3.0f);
 	
 	rlImGuiSetup(true);
@@ -849,6 +876,9 @@ int main()
 		}
 
 		testLightMovement(delta);
+		if (spawnCube) {
+			updateSpawnedCube(delta);
+		}
 		
 		if (IsFileDropped()) {
 			updateSkybox(skybox);
@@ -861,8 +891,6 @@ int main()
 
 			BeginMode3D(camera.c3d);
 			{
-		
-				
 				int timeLoc = GetShaderLocation(skybox.model.materials[0].shader, "time");
 				float elapsedTime = GetTime();
 				SetShaderValue(skybox.model.materials[0].shader, timeLoc, &elapsedTime, SHADER_UNIFORM_FLOAT);
@@ -874,8 +902,7 @@ int main()
 				rlEnableDepthMask();
 				
 				drawAxis();
-				DrawModel(cube.model, {3.5f, 0.25f, 3.5f}, 0.5f, RED);
-				
+								
 				if (kb.coloredGround) {
 					drawColoredGround(ground);
 				} else {
@@ -899,6 +926,15 @@ int main()
 				drawRollingCube();
 				EndShaderMode();
 
+				for (IndexPos idx : obstacles.indexPos) {
+					Vector3 v = positionFromIndexes(idx);
+					DrawModel(cube.model, v, 1.0f, RED);
+				}
+
+				if (spawnCube) {
+					DrawModel(cube.model, spawnPos, 1.0f, MAGENTA);
+				}
+				
 				drawLights();
 
 			}
@@ -971,12 +1007,10 @@ void imguiMenus() {
 
 	ImGui::Begin("Cube & Camera");
 	ImGui::SeparatorText("Cube");
-	ImGui::Text("gIndex:"); ImGui::SameLine(80);
-	ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%i", cube.gIndex);
-	ImGui::Text("index:"); ImGui::SameLine(80); ImGui::Text("ix="); ImGui::SameLine(120);
-	ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%i", cube.xzIndex[0]);
-	ImGui::SameLine(200); ImGui::Text("iz="); ImGui::SameLine(240);
-	ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%i", cube.xzIndex[1]);
+	ImGui::Text("pIndex:"); ImGui::SameLine(80); ImGui::Text("x="); ImGui::SameLine(120);
+	ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%i", cube.pIndex.x);
+	ImGui::SameLine(200); ImGui::Text("z="); ImGui::SameLine(240);
+	ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%i", cube.pIndex.z);
 	ImGui::DragFloat3("position", (float *)&cube.position, 1.0f, -1000.0f, 1000.0f);
 	ImGui::DragFloat3("next position", (float *)&cube.nextPosition, 1.0f, -1000.0f, 1000.0f);
 	ImGui::DragFloat3("direction", (float *)&cube.direction, 1.0f, -1000.0f, 1000.0f);
@@ -1026,7 +1060,7 @@ void imguiMenus() {
 		ImGui::Spacing();
 	}
 
-    // ImGui::Checkbox("free light", &camera.freeLight);        
+    // ImGui::Checkbox("isEmpty light", &camera.freeLight);        
 	// ImGui::DragFloat3("position  ", (float *)&camera.light.position, 0.2f, -1000.0f, 1000.0f);
 	// ImGui::DragFloat3("target  ", (float *)&camera.light.target, 0.2f, -1000.0f, 1000.0f);
 	// ImVec4 lightColor = RaylibColorToImVec4(camera.light.color);
