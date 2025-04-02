@@ -97,7 +97,7 @@ const int END_CELL_POS = 50;
 
 struct Cell {
 	bool isEmpty;
-	int obstacleId;
+	int entityId;
 	Color color;
 };
 struct Ground {
@@ -140,36 +140,30 @@ void initGround() {
 			ground.transforms[i] = MatrixTranslate(xCoord + 0.5f, 0.0f, zCoord + 0.5f);
 			
 			ground.cells[ix][iz].isEmpty = true;
-			ground.cells[ix][iz].obstacleId = -1;
+			ground.cells[ix][iz].entityId = -1;
 			ground.cells[ix][iz].color = getRandomColor();
 			i++;
 		}
 	}	
 }
 
-#include "obstacles.cpp"
-struct Obstacles {
-	IndexPos indexPos[10];
-};
+#include "entity.cpp"
+EntityPool entityPool;
 
-
-
-ObstaclePool obstaclePool;
-
-
-void indexesFromPosition(IndexPos& index, Vector3 pos) {
-	index.x = pos.x - 0.5 - BEGIN_CELL_POS;
-	index.z = pos.z - 0.5 - BEGIN_CELL_POS;
+void getIndexesFromPosition(PositionIndex& pIndex, Vector3 pos) {
+	pIndex.x = pos.x - 0.5 - BEGIN_CELL_POS;
+	pIndex.z = pos.z - 0.5 - BEGIN_CELL_POS;
 }
 
-Vector3 positionFromIndexes(IndexPos& index) {
-	return { BEGIN_CELL_POS + index.x + 0.5f, 0.5f, BEGIN_CELL_POS + index.z + 0.5f };
+Vector3 getPositionFromIndexes(PositionIndex& pIndex) {
+	return { BEGIN_CELL_POS + pIndex.x + 0.5f, 0.5f, BEGIN_CELL_POS + pIndex.z + 0.5f };
 }
+
 
 //********** Cube
 struct Cube {
 	Model model;
-	IndexPos pIndex;
+	PositionIndex pIndex;
 	Vector3 position;
 	Vector3 nextPosition;
 	Vector3 direction;
@@ -222,7 +216,7 @@ void initCube() {
 		.collision = LoadSound("assets/sounds/collision.wav"),
 	};
 		
-	indexesFromPosition(cube.pIndex, cubeInitPos);
+	getIndexesFromPosition(cube.pIndex, cubeInitPos);
 	cube.model.materials[0].shader = shader;
     cube.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logo;
 }
@@ -387,7 +381,32 @@ void mouseUpdateCubeDirection() {
 	}
 }
 
-void handleMouseButton() {
+Vector3 getMouseXZPosition() {
+    Ray mouseRay = GetMouseRay(GetMousePosition(), camera.c3d);
+
+    // Plane is at y = 0
+    float planeY = 0.0f;
+
+    // Ray formula: P = origin + t * direction
+    float t = (planeY - mouseRay.position.y) / mouseRay.direction.y;
+
+    if (t > 0) { // Ensure ray is pointing downward
+        return (Vector3) {
+            mouseRay.position.x + t * mouseRay.direction.x,
+            planeY,  // Always on XZ plane
+            mouseRay.position.z + t * mouseRay.direction.z
+        };
+    }
+
+    return (Vector3) { 0.0f, 0.0f, 0.0f }; // Default if no intersection
+}
+
+void getMouseXZindexes(PositionIndex& pIndex) {
+	Vector3 xzPos = getMouseXZPosition();
+	getIndexesFromPosition(pIndex, Vector3Add({ 0.5f, 0.0f, 0.5f}, xzPos));
+}
+
+void handleMouseButtons() {
 	if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
 		mouseUpdateCameraAngles();
 		mouseUpdateCubeDirection();
@@ -395,6 +414,27 @@ void handleMouseButton() {
 	} else {
         mouse.prevPosition = (Vector2){ 0.0f, 0.0f };
     }
+	
+	if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !kb.cursorHidden) {
+
+		PositionIndex pIndex;
+		getMouseXZindexes(pIndex);
+		
+		if (ground.cells[pIndex.x][pIndex.z].isEmpty) {
+			int id = entityPool.addEntity(pIndex);
+			ground.cells[pIndex.x][pIndex.z].entityId = id;
+			ground.cells[pIndex.x][pIndex.z].isEmpty = false;
+			
+		} else {
+			ground.cells[pIndex.x][pIndex.z].isEmpty = true;
+			int id = ground.cells[pIndex.x][pIndex.z].entityId;
+			Entity e = { pIndex, id };
+			entityPool.removeEntity(e);
+			
+			// store new id in the position
+			ground.cells[pIndex.x][pIndex.z].entityId = e.id;
+		}
+	}
 }
 
 const float MIN_CAMERA_DISTANCE = 5.0f;  // Minimum zoom distance
@@ -655,7 +695,6 @@ void drawRollingCube() {
 				
 	} else {
 		DrawModel(cube.model, cube.position, 1.0f, cube.facesColor);
-		// DrawCubeWires(cube.position, 1.0f, 1.0f, 1.0f, cube.wiresColor);
 	}
 }
 
@@ -857,13 +896,14 @@ int main()
 	SetShaderValue(shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
 
 
-	// Obstacles
-	obstaclePool.init(100);
+	// Entities
+	entityPool.init(100);
 	
-	IndexPos obstacles[10] = { { 53, 53 }, { 48, 48 }, { 53, 48 }, {50,51}, {52,49} };
-	for (IndexPos idx : obstacles) {
+	PositionIndex initialObstacles[5] = { { 53, 53 }, { 48, 48 }, { 53, 48 }, { 50, 51 }, { 52, 49 } };
+	for (PositionIndex idx : initialObstacles) {
+		int id = entityPool.addEntity(idx);
+		ground.cells[idx.x][idx.z].entityId = id;
 		ground.cells[idx.x][idx.z].isEmpty = false;
-		ground.cells[idx.x][idx.z].obstacleId = 1; // TODO: assign the obstacleId
 	}
 	
 	activationLightTimer.start(3.0f);
@@ -873,7 +913,7 @@ int main()
 	{
 		float delta = GetFrameTime();
 
-		handleMouseButton();
+		handleMouseButtons();
 		handleMouseWheel();
 		handleKeyboard();
 
@@ -935,6 +975,7 @@ int main()
 				if (kb.coloredGround) {
 					drawColoredGround(ground);
 				} else {
+					// TODO
 					BeginShaderMode(shader);
 					instancing = 1;
 					SetShaderValue(shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
@@ -942,11 +983,14 @@ int main()
 					EndShaderMode();
 				}
 				
-				BeginShaderMode(shader);
+				// TODO: since shader is applied to models...
+				// I think these 2 BeginShaderMode() above and below are not needed...
+				
+				BeginShaderMode(shader); // TODO
 				instancing = 0;
 				SetShaderValue(shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
 				
-				// Draw several planes to check its appearance
+				// Draw several planes with ground texture to check its appearance
 				DrawModel(ground.model, {-2.5f,0.05,-2.5f}, 1.0f, RED);
 				DrawModel(ground.model, {-3.5f,0.05,-2.5f}, 1.0f, RED);
 				DrawModel(ground.model, {-4.5f,0.05,-2.5f}, 1.0f, RED);
@@ -955,8 +999,9 @@ int main()
 				drawRollingCube();
 				EndShaderMode();
 
-				for (IndexPos idx : obstacles) {
-					Vector3 v = positionFromIndexes(idx);
+				for (int i=0; i<entityPool.getCount(); i++) {
+					PositionIndex idx = entityPool.getPositionIndex(i);
+					Vector3 v = getPositionFromIndexes(idx);
 					DrawModel(cube.model, v, 1.0f, RED);
 				}
 
@@ -973,7 +1018,7 @@ int main()
 			DrawRectangle(8, 8, 200, 44, RAYWHITE);
 			DrawFPS(12, tp);
 			DrawText("F1 - Toggle Menus", 12, tp + 20, 20, BLACK);
-			DrawText("F5 - Toggle ground colors", 12, tp + 60, 20, BLACK);
+			// DrawText("F5 - Toggle ground colors", 12, tp + 60, 20, BLACK);
 			if (!kb.cursorHidden) {
 				imguiMenus();
 				drawText(tp+120);	  
@@ -997,25 +1042,6 @@ int main()
 }
 
 
-Vector3 GetMouseXZPosition() {
-    Ray mouseRay = GetMouseRay(GetMousePosition(), camera.c3d);
-
-    // Plane is at y = 0
-    float planeY = 0.0f;
-
-    // Ray formula: P = origin + t * direction
-    float t = (planeY - mouseRay.position.y) / mouseRay.direction.y;
-
-    if (t > 0) { // Ensure ray is pointing downward
-        return (Vector3) {
-            mouseRay.position.x + t * mouseRay.direction.x,
-            planeY,  // Always on XZ plane
-            mouseRay.position.z + t * mouseRay.direction.z
-        };
-    }
-
-    return (Vector3) { 0.0f, 0.0f, 0.0f }; // Default if no intersection
-}
 
 //********** ImGui & DrawText stuff
 ImVec4 RaylibColorToImVec4(Color col) {
@@ -1061,11 +1087,11 @@ void imguiMenus() {
 	
 	ImGui::SeparatorText("Mouse");
 	
-	IndexPos xzIndex;
-	Vector3 xzPos = GetMouseXZPosition();
+	PositionIndex pIndex;
+	Vector3 xzPos = getMouseXZPosition();
 	ImGui::Text("xz position: (%0.2f, %0.2f)", xzPos.x, xzPos.z);
-	indexesFromPosition(xzIndex, Vector3Add({ 0.5f, 0.0f, 0.5f}, xzPos));
-	ImGui::Text("xz Index: (%i, %i)", xzIndex.x, xzIndex.z);
+	getIndexesFromPosition(pIndex, Vector3Add({ 0.5f, 0.0f, 0.5f}, xzPos));
+	ImGui::Text("xz Index: (%i, %i)", pIndex.x, pIndex.z);
 
 	ImGui::End();
 
@@ -1146,7 +1172,7 @@ void imguiMenus() {
 }
 
 void drawText(int margin) {
-	DrawText(TextFormat("cube.position: {%.2f, %.2f, %.2f}",
-						cube.position.x, cube.position.y, cube.position.z),
-			 10, margin, 20, BLACK);
+// 	DrawText(TextFormat("cube.position: {%.2f, %.2f, %.2f}",
+// 						cube.position.x, cube.position.y, cube.position.z),
+// 			 10, margin, 20, BLACK);
 }
