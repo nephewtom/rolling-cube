@@ -15,7 +15,7 @@ public:
 		}
 		_initTime = secs;
 
-		TRACELOGD("%s started with %f", _name, _initTime);
+		// TRACELOGD("%s started with %f", _name, _initTime);
 		_lifeTime = _initTime;
 		_enabled = true;
 	}
@@ -34,7 +34,7 @@ public:
 		if (_enabled) {
 			bool isDone = _lifeTime <= 0;
 			if (isDone) { 
-				TRACELOGD("%s expired!", _name); 
+				// TRACELOGD("%s expired!", _name); 
 				_enabled = false;
 			}
 			return isDone;

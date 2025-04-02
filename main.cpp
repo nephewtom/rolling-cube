@@ -9,7 +9,6 @@
 
 #include "imgui.h"
 #include "rlImGui.h"
-bool imgui_demo_window = false;
 
 #include <math.h>
 #include <stdarg.h>
@@ -89,13 +88,18 @@ void updateSkybox(Skybox& skybox) {
 	UnloadDroppedFiles(droppedFiles);
 }
 
+
+
 //********** Ground
+#include "entity.cpp"
+
 const int X_CELLS = 101;
 const int Z_CELLS = 101;
 const int BEGIN_CELL_POS = -50;
 const int END_CELL_POS = 50;
 
-struct Cell {
+class Cell {
+public:
 	bool isEmpty;
 	int entityId;
 	Color color;
@@ -147,7 +151,6 @@ void initGround() {
 	}	
 }
 
-#include "entity.cpp"
 EntityPool entityPool;
 
 void getIndexesFromPosition(PositionIndex& pIndex, Vector3 pos) {
@@ -159,6 +162,41 @@ Vector3 getPositionFromIndexes(PositionIndex& pIndex) {
 	return { BEGIN_CELL_POS + pIndex.x + 0.5f, 0.5f, BEGIN_CELL_POS + pIndex.z + 0.5f };
 }
 
+bool isValidPositionIndex(PositionIndex& pIndex) {
+	
+	return !(pIndex.x < 0 || pIndex.x > X_CELLS-1 || pIndex.z < 0 || pIndex.z > Z_CELLS - 1);
+}	
+
+struct EditOptions {
+	bool drawAxis;
+	bool coloredGround;
+	bool inputWindow;
+	bool entitiesWindow;
+	bool cubeWindow;
+	bool lightsWindow;
+	bool demoWindow;
+	bool editEnabled;
+	bool soundEnabled;
+};
+
+EditOptions ops = {
+	.drawAxis = false,
+	.coloredGround = false,
+	.inputWindow = true,
+	.entitiesWindow = true,
+	.cubeWindow = false,
+	.lightsWindow = false,
+	.demoWindow = false,
+	.editEnabled = false,
+	.soundEnabled = false,
+};
+
+
+void playSound(Sound sound) {
+	if (ops.soundEnabled) {
+		PlaySound(sound);
+	}
+}
 
 //********** Cube
 struct Cube {
@@ -218,7 +256,7 @@ void initCube() {
 		
 	getIndexesFromPosition(cube.pIndex, cubeInitPos);
 	cube.model.materials[0].shader = shader;
-    cube.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logo;
+	cube.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logo;
 }
 
 //********** Cube Camera
@@ -285,9 +323,6 @@ struct Keyboard {
 	int queuedKey;
 	bool shiftPressed;
 
-	bool cursorHidden;
-	bool drawAxis;
-	bool coloredGround;
 	bool instancingEnabled;
 };
 Keyboard kb = {
@@ -301,9 +336,6 @@ Keyboard kb = {
     .queuedKey = 0,
 	.shiftPressed = false,
 	
-    .cursorHidden = false,
-	.drawAxis = false,
-	.coloredGround = false,
 	.instancingEnabled = true,
 };
 class KeyDelay {
@@ -331,11 +363,17 @@ struct Mouse {
 	Vector2 position;
 	Vector2 prevPosition;
 	Vector2 deltaPosition;
+	
+	bool cursorHidden;
+	bool zoomEnabled;	
 };
 Mouse mouse = {
 	.position = {0.0f, 0.0f},
 	.prevPosition = {0.0f, 0.0f},
 	.deltaPosition = {0.0f, 0.0f},
+	
+	.cursorHidden = false,
+	.zoomEnabled = true,
 };
 
 void mouseUpdateCameraAngles() {
@@ -398,12 +436,49 @@ Vector3 getMouseXZPosition() {
         };
     }
 
-    return (Vector3) { 0.0f, 0.0f, 0.0f }; // Default if no intersection
+	// return a negative Y, meaning no intersection
+    return (Vector3) { 0.0f, -1.0f, 0.0f };
 }
 
 void getMouseXZindexes(PositionIndex& pIndex) {
 	Vector3 xzPos = getMouseXZPosition();
+// TRACELOGD("xzPos: (%.2f, %.2f, %.2f)", xzPos.x, xzPos.y, xzPos.z);
+	if (xzPos.y == -1.0f) {
+		pIndex = { -1, -1 }; // Invalid indexes
+		return;
+	}
 	getIndexesFromPosition(pIndex, Vector3Add({ 0.5f, 0.0f, 0.5f}, xzPos));
+}
+
+void editEntity() {
+	
+	PositionIndex pIndex;
+	getMouseXZindexes(pIndex);
+	TRACELOGD("Entity at pIndex: (%i, %i)", pIndex.x, pIndex.z);
+	if (!isValidPositionIndex(pIndex)) {
+		TRACELOG(LOG_WARNING, ": Invalid pIndex!");
+		return; // Invalid index
+	}
+		
+	if (ground.cells[pIndex.x][pIndex.z].isEmpty) {
+		int id = entityPool.add(pIndex, Entity::OBSTACLE);
+		ground.cells[pIndex.x][pIndex.z].entityId = id;
+		ground.cells[pIndex.x][pIndex.z].isEmpty = false;
+		TRACELOGD("Added entity!");			
+			
+	} else {
+		int id = ground.cells[pIndex.x][pIndex.z].entityId;
+		TRACELOGD("entity to swap: %i\n", id);
+		ground.cells[pIndex.x][pIndex.z].entityId = -1;
+		ground.cells[pIndex.x][pIndex.z].isEmpty = true;
+		
+		EntityQuery eq = { {}, id };
+		entityPool.remove(eq);
+		
+		// store new id in the position
+		ground.cells[eq.pIndex.x][eq.pIndex.z].entityId = eq.id;
+		TRACELOGD("Updated cell: ground.cells[%i][%i].id = %i\n", eq.pIndex.x, eq.pIndex.z, eq.id);		
+	}
 }
 
 void handleMouseButtons() {
@@ -415,25 +490,8 @@ void handleMouseButtons() {
         mouse.prevPosition = (Vector2){ 0.0f, 0.0f };
     }
 	
-	if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !kb.cursorHidden) {
-
-		PositionIndex pIndex;
-		getMouseXZindexes(pIndex);
-		
-		if (ground.cells[pIndex.x][pIndex.z].isEmpty) {
-			int id = entityPool.addEntity(pIndex);
-			ground.cells[pIndex.x][pIndex.z].entityId = id;
-			ground.cells[pIndex.x][pIndex.z].isEmpty = false;
-			
-		} else {
-			ground.cells[pIndex.x][pIndex.z].isEmpty = true;
-			int id = ground.cells[pIndex.x][pIndex.z].entityId;
-			Entity e = { pIndex, id };
-			entityPool.removeEntity(e);
-			
-			// store new id in the position
-			ground.cells[pIndex.x][pIndex.z].entityId = e.id;
-		}
+	if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !mouse.cursorHidden && ops.editEnabled) {
+		editEntity();
 	}
 }
 
@@ -441,8 +499,10 @@ const float MIN_CAMERA_DISTANCE = 5.0f;  // Minimum zoom distance
 const float MAX_CAMERA_DISTANCE = 100.0f;  // Maximum zoom distance
 const float ZOOM_SPEED = 1.0f;           // Zoom sensitivity
 void handleMouseWheel() {
-    // Handle mouse wheel for zoom
-    float mouseWheel = GetMouseWheelMove();
+	
+	if (!mouse.zoomEnabled) return;
+	// Handle mouse wheel for zoom
+	float mouseWheel = GetMouseWheelMove();
     if (mouseWheel != 0) {
         camera.distance -= mouseWheel * ZOOM_SPEED;
         camera.distance = fmax(MIN_CAMERA_DISTANCE, fmin(camera.distance, MAX_CAMERA_DISTANCE));
@@ -559,7 +619,7 @@ void calculateCubeMovement(int pressedKey) {
 	}
 
 	if (hasCollision()) {
-		PlaySound(cube.collision);
+		playSound(cube.collision);
 		return;
 	}
 	
@@ -599,7 +659,7 @@ void updateCubeMovement(float delta) {
 
 		cube.pitchChange = KeyDelay::lerpPitch(kb.pressReleaseTime, 0.03f, 0.3f);
 		SetSoundPitch(cube.rollWav, cube.pitchChange);
-		PlaySound(cube.rollWav);
+		playSound(cube.rollWav);
 		                
 		cube.position = cube.nextPosition;
 		cube.animationProgress = 0.0f;
@@ -613,14 +673,15 @@ void updateCubeMovement(float delta) {
 void handleKeyboard() {
 	
 	if (IsKeyPressed(KEY_F1)) {
-		kb.cursorHidden = !kb.cursorHidden;
-		if (kb.cursorHidden)
+		mouse.cursorHidden = !mouse.cursorHidden;
+		if (mouse.cursorHidden)
 			HideCursor();
 		else 
 			ShowCursor();
 	}
-	if (IsKeyPressed(KEY_F10)) { imgui_demo_window = !imgui_demo_window; }
-	if (IsKeyPressed(KEY_F5)) { kb.coloredGround = !kb.coloredGround; }
+	if (IsKeyPressed(KEY_F10)) { ops.demoWindow = !ops.demoWindow; }
+	if (IsKeyPressed(KEY_F4)) { ops.editEnabled = !ops.editEnabled; }
+	if (IsKeyPressed(KEY_F5)) { ops.coloredGround = !ops.coloredGround; }
 	if (IsKeyPressed(KEY_F11)) { ToggleFullscreen(); }
 
 	
@@ -761,7 +822,7 @@ void testLightMovement(float delta) {
 		lights[1].position.x = -5.5f;
 		lights[1].enabled = true;
 		moveTimer.start(0.5f);
-		PlaySound(waveSound[0]);
+		playSound(waveSound[0]);
 	}
 
 	moveTimer.update(delta);
@@ -778,7 +839,7 @@ void testLightMovement(float delta) {
 		spawnDirUp = true;
 		return;
 	}
-	PlaySound(waveSound[countTimer]);
+	playSound(waveSound[countTimer]);
 	lights[1].position.x += 1.0f;
 	moveTimer.start();
 }
@@ -877,7 +938,7 @@ int main()
 	InitAudioDevice();
 	initWave();
 
-	if (kb.cursorHidden) {
+	if (mouse.cursorHidden) {
 		HideCursor();
 	}
 
@@ -901,7 +962,7 @@ int main()
 	
 	PositionIndex initialObstacles[5] = { { 53, 53 }, { 48, 48 }, { 53, 48 }, { 50, 51 }, { 52, 49 } };
 	for (PositionIndex idx : initialObstacles) {
-		int id = entityPool.addEntity(idx);
+		int id = entityPool.add(idx, Entity::OBSTACLE);
 		ground.cells[idx.x][idx.z].entityId = id;
 		ground.cells[idx.x][idx.z].isEmpty = false;
 	}
@@ -968,11 +1029,11 @@ int main()
 				rlEnableBackfaceCulling();
 				rlEnableDepthMask();
 				
-				if (kb.drawAxis) {
+				if (ops.drawAxis) {
 					drawAxis();
 				}
 								
-				if (kb.coloredGround) {
+				if (ops.coloredGround) {
 					drawColoredGround(ground);
 				} else {
 					// TODO
@@ -1015,11 +1076,12 @@ int main()
 			EndMode3D();
 
 			int tp = 10; // topMargin
-			DrawRectangle(8, 8, 200, 44, RAYWHITE);
+			DrawRectangle(8, 8, 200, 64, RAYWHITE);
 			DrawFPS(12, tp);
 			DrawText("F1 - Toggle Menus", 12, tp + 20, 20, BLACK);
+			DrawText("F4 - Edit Enabled", 12, tp + 40, 20, BLACK);
 			// DrawText("F5 - Toggle ground colors", 12, tp + 60, 20, BLACK);
-			if (!kb.cursorHidden) {
+			if (!mouse.cursorHidden) {
 				imguiMenus();
 				drawText(tp+120);	  
 			}
@@ -1044,116 +1106,217 @@ int main()
 
 
 //********** ImGui & DrawText stuff
-ImVec4 RaylibColorToImVec4(Color col) {
+ImVec4 RaylibColorToImVec4(Color column) {
     return ImVec4(
-        col.r / 255.0f, // Red (0 to 1)
-        col.g / 255.0f, // Green (0 to 1)
-        col.b / 255.0f, // Blue (0 to 1)
-        col.a / 255.0f  // Alpha (0 to 1)
+        column.r / 255.0f, // Red (0 to 1)
+        column.g / 255.0f, // Green (0 to 1)
+        column.b / 255.0f, // Blue (0 to 1)
+        column.a / 255.0f  // Alpha (0 to 1)
 		);
 }
 
 // Convert ImGui color format back to Raylib Color (0 to 255)
-Color ImVec4ToRaylibColor(ImVec4 col) {
+Color ImVec4ToRaylibColor(ImVec4 column) {
     return Color{
-        (unsigned char)(col.x * 255), // Red (0 to 255)
-        (unsigned char)(col.y * 255), // Green (0 to 255)
-        (unsigned char)(col.z * 255), // Blue (0 to 255)
-        (unsigned char)(col.w * 255)  // Alpha (0 to 255)
+        (unsigned char)(column.x * 255), // Red (0 to 255)
+        (unsigned char)(column.y * 255), // Green (0 to 255)
+        (unsigned char)(column.z * 255), // Blue (0 to 255)
+        (unsigned char)(column.w * 255)  // Alpha (0 to 255)
     };
 }
 void imguiMenus() {
 
 	rlImGuiBegin();
-	ImGui::Begin("Keyboard & Mouse");
-
-	ImGui::SeparatorText("Keyboard");
-	ImGui::Checkbox("Colored Ground plane (F6)", &kb.coloredGround);
-	bool isShiftDown = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT));
-	ImGui::Checkbox("IsShiftDown", &isShiftDown);
-	// ImGui::Text("pressedKey: ");  ImGui::SameLine(180); 
-	// ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%i", pressedKey);
-	ImGui::Text("kb.pressedKey: ");  ImGui::SameLine(180); 
-	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%i", kb.pressedKey);
-	ImGui::Checkbox("hasQueuedKey", &kb.hasQueuedKey);
-	ImGui::Spacing();
-	ImGui::Text("Press/Release time:"); ImGui::SameLine(180);
-	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.3f", kb.pressReleaseTime);
-	ImGui::Text("Cube animation speed:"); ImGui::SameLine(180);
-	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.3f", cube.animationSpeed); ImGui::SameLine(280);
-	ImGui::Text("Pitch change:"); ImGui::SameLine(380);
-	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.3f", cube.pitchChange);
-	ImGui::Spacing();
-	
-	ImGui::SeparatorText("Mouse");
-	
-	PositionIndex pIndex;
-	Vector3 xzPos = getMouseXZPosition();
-	ImGui::Text("xz position: (%0.2f, %0.2f)", xzPos.x, xzPos.z);
-	getIndexesFromPosition(pIndex, Vector3Add({ 0.5f, 0.0f, 0.5f}, xzPos));
-	ImGui::Text("xz Index: (%i, %i)", pIndex.x, pIndex.z);
-
+	ImGui::Begin("Main Control");
+	ImGui::Checkbox("Keyboard & Mouse", &ops.inputWindow);
+	ImGui::Checkbox("Entities", &ops.entitiesWindow);
+	ImGui::Checkbox("Cube & Camera", &ops.cubeWindow);
+	ImGui::Checkbox("Lights", &ops.lightsWindow);
+	ImGui::Checkbox("ImGui Demo", &ops.demoWindow);
+	ImGui::Checkbox("Sound Enabled", &ops.soundEnabled);
 	ImGui::End();
+	
+	if (ops.inputWindow) {
+		ImGui::Begin("Keyboard & Mouse");
 
-	ImGui::Begin("Cube & Camera");
-	ImGui::SeparatorText("Cube");
-	ImGui::Checkbox("isMoving", &cube.isMoving);
-	ImGui::Text("pIndex (ix, iz):"); ImGui::SameLine(140);
-	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "(%i, %i)", cube.pIndex.x, cube.pIndex.z);
-	ImGui::DragFloat3("position", (float *)&cube.position, 1.0f, -1000.0f, 1000.0f);
-	ImGui::DragFloat3("next position", (float *)&cube.nextPosition, 1.0f, -1000.0f, 1000.0f);
-	ImGui::DragFloat3("direction", (float *)&cube.direction, 1.0f, -1000.0f, 1000.0f);
-	ImGui::DragFloat3("rotationAxis", (float *)&cube.rotationAxis, 1.0f, -1000.0f, 1000.0f);
-	ImGui::DragFloat("rotationAngle", (float *)&cube.rotationAngle, 1.0f, 200.0f, 2000.0f);
-	ImVec4 cubeFacesColor = RaylibColorToImVec4(cube.facesColor);
-	if (ImGui::ColorEdit4("faces color", &cubeFacesColor.x)) {
-		cube.facesColor = ImVec4ToRaylibColor(cubeFacesColor);
+		ImGui::SeparatorText("Keyboard");
+		bool isShiftDown = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT));
+		ImGui::Text("kb.pressedKey: ");  ImGui::SameLine(180); 
+		ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%i", kb.pressedKey);
+		ImGui::Checkbox("IsShiftDown", &isShiftDown);
+		ImGui::Checkbox("hasQueuedKey", &kb.hasQueuedKey);
+		ImGui::Spacing();
+		ImGui::Text("Press/Release time:"); ImGui::SameLine(180);
+		ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.3f", kb.pressReleaseTime);
+		ImGui::Text("Cube animation speed:"); ImGui::SameLine(180);
+		ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.3f", cube.animationSpeed); ImGui::SameLine(280);
+		ImGui::Text("Pitch change:"); ImGui::SameLine(380);
+		ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.3f", cube.pitchChange);
+		ImGui::Spacing();
+	
+		ImGui::SeparatorText("Mouse");
+	
+		Vector3 xzPos = getMouseXZPosition();
+		ImGui::Text("xz position: (%0.2f, %0.2f)", xzPos.x, xzPos.z);
+		PositionIndex pIndex;
+		getMouseXZindexes(pIndex);
+		ImGui::Text("xz Index: (%i, %i)", pIndex.x, pIndex.z);
+		ImGui::Checkbox("Zoom Enabled", &mouse.zoomEnabled);
+		ImGui::End();
 	}
-	ImVec4 cubeWiresColor = RaylibColorToImVec4(cube.wiresColor);
-	if (ImGui::ColorEdit4("wires color", &cubeWiresColor.x)) {
-		cube.wiresColor = ImVec4ToRaylibColor(cubeWiresColor);
-	}
-	ImGui::Spacing();
 
-	ImGui::SeparatorText("Camera");
-	ImGui::Checkbox("drawAxis", &kb.drawAxis);	
-	ImGui::DragFloat3("position ", (float *)&camera.c3d.position, 1.0f, -1000.0f, 1000.0f);
-	ImGui::DragFloat3("target ", (float *)&camera.c3d.target, 1.0f, -1000.0f, 1000.0f);
-	float camAngleX = camera.angleX * RAD2DEG;
-	float camAngleY = camera.angleY * RAD2DEG;
-	ImGui::DragFloat("angle_x", (float*)&camAngleX, 1.0f, 200.0f, 2000.0f);
-	ImGui::DragFloat("angle_y", (float*)&camAngleY, 1.0f, 200.0f, 2000.0f);
-	ImGui::Spacing();
-	ImGui::End();
-
-	ImGui::Begin("Lighting");
-	ImGui::SeparatorText("Lights");
-	ImGui::ColorEdit4("ambient", &ambient.x);
-	ImGui::Text("lightsCount:"); ImGui::SameLine(180);
-	ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%i", lightsCount);
-	ImVec4 lightColor[6];
-	for (int i=0; i<=5; i++) {
-		const char* type = (lights[i].type == LIGHT_POINT ? "Point" : "Directional");
-		const char* lightName = TextFormat("Light %i - %s", i, type);
-		if (ImGui::CollapsingHeader( lightName)) {
-			const char* posStr = TextFormat("position##%i", i);
-			const char* colorStr = TextFormat("color##%i", i);
-			const char* enableStr = TextFormat("enable##%i", i);
-			const char* hiddenStr = TextFormat("hidden##%i", i);
-			ImGui::Checkbox(enableStr, &lights[i].enabled);ImGui::SameLine(140);
-			ImGui::Checkbox(hiddenStr, &lights[i].hidden);
-			ImGui::DragFloat3(posStr, (float *)&lights[i].position, 0.5f, -20.0f, 20.0f);
-			lightColor[i] = RaylibColorToImVec4(lights[i].color);
-			if (ImGui::ColorEdit4(colorStr, &lightColor[i].x)) {
-				lights[i].color = ImVec4ToRaylibColor(lightColor[i]);
-			}
-			if (lights[i].type == LIGHT_DIRECTIONAL) {
-				const char* targetStr = TextFormat("target##%i", i);
-				ImGui::DragFloat3(targetStr, (float *)&lights[i].target, 0.5f, -100.0f, 100.0f);
-			}
-			ImGui::Spacing();
+	if (ops.cubeWindow) {
+		ImGui::Begin("Cube, Camera & Other");
+		ImGui::SeparatorText("Cube");
+		ImGui::Checkbox("isMoving", &cube.isMoving);
+		ImGui::Text("pIndex (ix, iz):"); ImGui::SameLine(140);
+		ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "(%i, %i)", cube.pIndex.x, cube.pIndex.z);
+		ImGui::DragFloat3("position", (float *)&cube.position, 1.0f, -1000.0f, 1000.0f);
+		ImGui::DragFloat3("next position", (float *)&cube.nextPosition, 1.0f, -1000.0f, 1000.0f);
+		ImGui::DragFloat3("direction", (float *)&cube.direction, 1.0f, -1000.0f, 1000.0f);
+		ImGui::DragFloat3("rotationAxis", (float *)&cube.rotationAxis, 1.0f, -1000.0f, 1000.0f);
+		ImGui::DragFloat("rotationAngle", (float *)&cube.rotationAngle, 1.0f, 200.0f, 2000.0f);
+		ImVec4 cubeFacesColor = RaylibColorToImVec4(cube.facesColor);
+		if (ImGui::ColorEdit4("faces color", &cubeFacesColor.x)) {
+			cube.facesColor = ImVec4ToRaylibColor(cubeFacesColor);
 		}
+		ImVec4 cubeWiresColor = RaylibColorToImVec4(cube.wiresColor);
+		if (ImGui::ColorEdit4("wires color", &cubeWiresColor.x)) {
+			cube.wiresColor = ImVec4ToRaylibColor(cubeWiresColor);
+		}
+		ImGui::Spacing();
+
+		ImGui::SeparatorText("Camera");
+		ImGui::DragFloat3("position ", (float *)&camera.c3d.position, 1.0f, -1000.0f, 1000.0f);
+		ImGui::DragFloat3("target ", (float *)&camera.c3d.target, 1.0f, -1000.0f, 1000.0f);
+		float camAngleX = camera.angleX * RAD2DEG;
+		float camAngleY = camera.angleY * RAD2DEG;
+		ImGui::DragFloat("angle_x", (float*)&camAngleX, 1.0f, 200.0f, 2000.0f);
+		ImGui::DragFloat("angle_y", (float*)&camAngleY, 1.0f, 200.0f, 2000.0f);
+		ImGui::Spacing();
+	
+		ImGui::SeparatorText("Other");
+		ImGui::Checkbox("drawAxis", &ops.drawAxis);	
+		ImGui::Checkbox("Colored Ground plane", &ops.coloredGround);
+		ImGui::End();
 	}
+	
+	if (ops.entitiesWindow) {
+		
+		ImGui::Begin("Entities");
+		ImGui::Text("Total number:"); ImGui::SameLine(120);
+		ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%i", entityPool.getCount());
+		
+		if (ImGui::TreeNode("List of entities")) {
+			
+			static ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg 
+				| ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp
+				| ImGuiTableFlags_Reorderable | ImGuiTableFlags_Hideable;
+			
+			const float TEXT_BASE_HEIGHT = ImGui::GetTextLineHeightWithSpacing();
+			ImVec2 outer_size = ImVec2(0.0f, TEXT_BASE_HEIGHT * 8);
+			ImGui::BeginTable("entities", 3, flags, outer_size);
+			ImGui::TableSetupScrollFreeze(0, 1); // Make top row always visible
+			ImGui::TableSetupColumn("id");
+			ImGui::TableSetupColumn("pIndex");
+			ImGui::TableSetupColumn("type");
+			ImGui::TableHeadersRow();
+			
+			for (int id = 0; id < entityPool.getCount(); id++) {
+				Entity e = entityPool.getEntity(id);
+				ImGui::TableNextRow();
+				for (int column = 0; column < 3; column++) {
+					ImGui::TableSetColumnIndex(column);
+					if (column == 0) ImGui::Text("%i", id);
+					else if (column == 1) ImGui::Text("(%i, %i)", e.pIndex.x, e.pIndex.z);
+					else ImGui::Text("%s", e.getTypeStr());
+				}
+			}
+			ImGui::EndTable();
+			
+			ImGui::TreePop();
+		}
+		ImGui::Spacing();
+		
+		ImGui::SeparatorText("Ground Cell");
+		PositionIndex pIndex;
+		getMouseXZindexes(pIndex);
+
+		ImGui::Text("pIndex:"); ImGui::SameLine(70);
+		if (!isValidPositionIndex(pIndex)) {
+			
+			ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "INVALID"); ImGui::SameLine(150);
+			ImGui::Text("isEmpty: "); ImGui::SameLine();
+			ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "-");
+			ImGui::Text("EntityId: "); ImGui::SameLine();			
+			ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "-"); ImGui::SameLine(150);
+			ImGui::Text("type: "); ImGui::SameLine(); 
+			ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "-");
+		} else {
+			
+			ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "(%i, %i)", pIndex.x, pIndex.z);	ImGui::SameLine(150);
+			Cell cell = ground.cells[pIndex.x][pIndex.z];
+			ImGui::Text("isEmpty: "); ImGui::SameLine();
+			ImGui::TextColored(ImVec4(cell.isEmpty ? 1.0f : 0.0f, cell.isEmpty ? 0.0f : 1.0f, 0.0f, 1.0f), 
+							   "%s", cell.isEmpty ? "true" : "false");
+			ImGui::Text("EntityId: "); ImGui::SameLine();
+			if (!cell.isEmpty) {
+				Entity e = entityPool.getEntity(cell.entityId);
+				ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.9f, 1.0f), "%i", cell.entityId); ImGui::SameLine(150);
+				ImGui::Text("type: "); ImGui::SameLine();
+				ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.9f, 1.0f), "%s", e.getTypeStr());
+			} else {
+				ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "-"); ImGui::SameLine(150);
+				ImGui::Text("type: "); ImGui::SameLine(); 
+				ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "-");
+			}
+
+		}
+
+		ImGui::Spacing();
+		ImGui::SeparatorText("Other");
+		static int type = 0;
+		ImGui::RadioButton("Obstacle", &type, Entity::OBSTACLE); ImGui::SameLine();
+		ImGui::RadioButton("PushBox", &type, Entity::PUSHBOX); ImGui::SameLine();
+		ImGui::RadioButton("Other", &type, Entity::OTHER);
+
+		
+		ImGui::Spacing();
+		ImGui::Checkbox("editEnabled", &ops.editEnabled);
+
+		ImGui::End();
+	}
+	
+	
+	if (ops.lightsWindow) {
+		ImGui::Begin("Lighting");
+		ImGui::SeparatorText("Lights");
+		ImGui::ColorEdit4("ambient", &ambient.x);
+		ImGui::Text("lightsCount:"); ImGui::SameLine(180);
+		ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%i", lightsCount);
+		ImVec4 lightColor[6];
+		for (int i=0; i<=5; i++) {
+			const char* type = (lights[i].type == LIGHT_POINT ? "Point" : "Directional");
+			const char* lightName = TextFormat("Light %i - %s", i, type);
+			if (ImGui::CollapsingHeader( lightName)) {
+				const char* posStr = TextFormat("position##%i", i);
+				const char* colorStr = TextFormat("color##%i", i);
+				const char* enableStr = TextFormat("enable##%i", i);
+				const char* hiddenStr = TextFormat("hidden##%i", i);
+				ImGui::Checkbox(enableStr, &lights[i].enabled);ImGui::SameLine(140);
+				ImGui::Checkbox(hiddenStr, &lights[i].hidden);
+				ImGui::DragFloat3(posStr, (float *)&lights[i].position, 0.5f, -20.0f, 20.0f);
+				lightColor[i] = RaylibColorToImVec4(lights[i].color);
+				if (ImGui::ColorEdit4(colorStr, &lightColor[i].x)) {
+					lights[i].color = ImVec4ToRaylibColor(lightColor[i]);
+				}
+				if (lights[i].type == LIGHT_DIRECTIONAL) {
+					const char* targetStr = TextFormat("target##%i", i);
+					ImGui::DragFloat3(targetStr, (float *)&lights[i].target, 0.5f, -100.0f, 100.0f);
+				}
+				ImGui::Spacing();
+			}
+		}
 
 // ImGui::Checkbox("isEmpty light", &camera.freeLight);        
 // ImGui::DragFloat3("position  ", (float *)&camera.light.position, 0.2f, -1000.0f, 1000.0f);
@@ -1162,11 +1325,11 @@ void imguiMenus() {
 // if (ImGui::ColorEdit4("color", &lightColor.x)) {
 // 	camera.light.color = ImVec4ToRaylibColor(lightColor);
 // }
+		ImGui::End();
+	}
 
-	ImGui::End();
-
-	if (imgui_demo_window) {
-		ImGui::ShowDemoWindow(&imgui_demo_window);
+	if (ops.demoWindow) {
+		ImGui::ShowDemoWindow(&ops.demoWindow);
 	}
 	rlImGuiEnd();
 }
