@@ -22,4 +22,4 @@ move *.o obj
 
 set /p=--- Linking rlImGui...<nul
 @echo on
-ar -rcs ./src/librlImGui.a obj/*.o
+ar -rcs ./src/librlImGui.a obj/imgui.o obj/imgui_demo.o obj/imgui_draw.o obj/imgui_tables.o obj/imgui_widgets.o obj/rlImGui.o

@@ -2,7 +2,7 @@
 set /p=***** Building raylib *****<nul
 pushd raylib\src
 @echo on
-mingw32-make.exe
+make -j4
 @echo off
 popd
 copy raylib\src\libraylib.a .
@@ -11,7 +11,9 @@ echo.
 set /p=***** Building rlImGui *****<nul
 pushd rlImGui
 @echo on
-call build.bat
+make -j4
+:: call build.bat
 @echo off
 popd
 copy rlImGui\src\librlImGui.a .
+     
