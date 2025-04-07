@@ -5,6 +5,9 @@
 struct PositionIndex {
 	int x;
 	int z;
+	PositionIndex operator+(const PositionIndex& other) const {
+		return {x + other.x, z + other.z};
+	}
 };
 
 struct EntityQuery {
@@ -15,7 +18,7 @@ struct EntityQuery {
 class Entity {
 public:
 	enum Type {
-		OBSTACLE, PUSHBOX, OTHER
+		EMPTY, OBSTACLE, PUSHBOX, OTHER
 	};
 
 	const char* getTypeStr() {
@@ -29,6 +32,7 @@ public:
 	
 	PositionIndex pIndex;
 	Type type;
+	bool hidden;
 
 };
 
@@ -41,7 +45,7 @@ private:
 public:
 	int getCount() { return _count; }
 	PositionIndex getPositionIndex(int id) { return _entity[id].pIndex; }
-	Entity getEntity(int id) { return _entity[id]; }
+	Entity& getEntity(int id) { return _entity[id]; }
 	
     // Initialize the structure with an initial capacity
 	void init(int capacity) {
@@ -80,6 +84,7 @@ public:
 		int id = _count;
 		_entity[id].pIndex = pIndex;
 		_entity[id].type = type;
+		_entity[id].hidden = false;
 		_count++;
 		
 		return id;

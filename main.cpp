@@ -17,6 +17,8 @@
 #include "rlights.c"
 #define GLSL_VERSION 330
 
+
+
 //********** Shaders and Textures
 
 Shader shader;
@@ -93,10 +95,10 @@ void updateSkybox(Skybox& skybox) {
 //********** Ground
 #include "entity.cpp"
 
-const int X_CELLS = 101;
-const int Z_CELLS = 101;
-const int BEGIN_CELL_POS = -50;
-const int END_CELL_POS = 50;
+const int X_CELLS = 199;
+const int Z_CELLS = 199;
+const int BEGIN_CELL_POS = 0;
+const int END_CELL_POS = 199;
 
 class Cell {
 public:
@@ -172,6 +174,8 @@ struct EditOptions {
 	bool coloredGround;
 	bool inputWindow;
 	bool entitiesWindow;
+	int entityType;
+	
 	bool cubeWindow;
 	bool lightsWindow;
 	bool demoWindow;
@@ -184,6 +188,7 @@ EditOptions ops = {
 	.coloredGround = false,
 	.inputWindow = true,
 	.entitiesWindow = true,
+	.entityType = Entity::OBSTACLE,
 	.cubeWindow = false,
 	.lightsWindow = false,
 	.demoWindow = false,
@@ -204,7 +209,7 @@ struct Cube {
 	PositionIndex pIndex;
 	Vector3 position;
 	Vector3 nextPosition;
-	Vector3 direction;
+	Vector3 direction; // Only uses x,z coordinates
 	Vector3 moveStep;
 	
 	Vector3 rotationAxis;
@@ -212,7 +217,12 @@ struct Cube {
 	float rotationAngle;
 	Matrix transform;
     
-	bool isMoving;
+	enum State {
+		QUIET, MOVING, PUSHING
+	};
+	State state;
+	Entity::Type pushing;
+	
 	float animationProgress;
 	float animationSpeed;
 
@@ -225,7 +235,7 @@ struct Cube {
 };
 Cube cube;
 
-Vector3 cubeInitPos = {0.5f, 0.51f, 0.5f};
+Vector3 cubeInitPos = {50.5f, 0.51f, 50.5f};
 
 void initCube() {
 
@@ -242,7 +252,8 @@ void initCube() {
 		.rotationAngle = 0.0f,
 		.transform = MatrixIdentity(),
 
-		.isMoving = false,
+		.state = Cube::QUIET,
+		.pushing = Entity::EMPTY,
 		.animationProgress = 0.0f,
 		.animationSpeed = 2.5f,
 
@@ -271,7 +282,7 @@ CubeCamera camera;
 
 void initCamera() {
 	camera.c3d = {
-		.position = (Vector3){10.0f, 3.0f, 0.5f},
+		.position = Vector3Add(cubeInitPos, Vector3({9.5f, 2.5f, 0.5f})),
 		.target = cubeInitPos,
 		.up = (Vector3){0.0f, 1.0f, 0.0f},
 		.fovy = 45.0f,
@@ -365,7 +376,11 @@ struct Mouse {
 	Vector2 deltaPosition;
 	
 	bool cursorHidden;
-	bool zoomEnabled;	
+	
+	bool zoomEnabled;
+	float zoomSpeed;
+	float minZoomDistance;
+	float maxZoomDistance;
 };
 Mouse mouse = {
 	.position = {0.0f, 0.0f},
@@ -373,24 +388,27 @@ Mouse mouse = {
 	.deltaPosition = {0.0f, 0.0f},
 	
 	.cursorHidden = false,
+	
 	.zoomEnabled = true,
+	.zoomSpeed = 1.0f,
+	.minZoomDistance = 5.0f,
+	.maxZoomDistance = 100.0f,
 };
 
 void mouseUpdateCameraAngles() {
-	mouse.deltaPosition = { 0.0f, 0.0f };
+	
+	Vector2 center = { GetScreenWidth() / 2.0f, GetScreenHeight() / 2.0f };
+
 	mouse.position = GetMousePosition();
             
-	if (mouse.prevPosition.x != 0.0f || mouse.prevPosition.y != 0.0f) {
-		mouse.deltaPosition.x = mouse.position.x - mouse.prevPosition.x;
-		mouse.deltaPosition.y = mouse.position.y - mouse.prevPosition.y;
-	}
-	mouse.prevPosition = mouse.position;
-            
+	mouse.deltaPosition = { mouse.position.x - center.x, mouse.position.y - center.y };
+
 	// Update camera angles based on mouse movement
 	camera.angleX -= mouse.deltaPosition.x * 0.003f;
-	camera.angleY = camera.angleY + mouse.deltaPosition.y * 0.003f;
+	camera.angleY += mouse.deltaPosition.y * 0.003f;
 	camera.angleY = Clamp(camera.angleY, -1.5*DEG2RAD, PI/2 - 0.3f);
 
+	SetMousePosition(center.x, center.y);
 }
 
 void mouseUpdateCubeDirection() {
@@ -461,7 +479,7 @@ void editEntity() {
 	}
 		
 	if (ground.cells[pIndex.x][pIndex.z].isEmpty) {
-		int id = entityPool.add(pIndex, Entity::OBSTACLE);
+		int id = entityPool.add(pIndex, (Entity::Type)ops.entityType);
 		ground.cells[pIndex.x][pIndex.z].entityId = id;
 		ground.cells[pIndex.x][pIndex.z].isEmpty = false;
 		TRACELOGD("Added entity!");			
@@ -475,37 +493,49 @@ void editEntity() {
 		EntityQuery eq = { {}, id };
 		entityPool.remove(eq);
 		
-		// store new id in the position
+		// store new entityId in the position
 		ground.cells[eq.pIndex.x][eq.pIndex.z].entityId = eq.id;
-		TRACELOGD("Updated cell: ground.cells[%i][%i].id = %i\n", eq.pIndex.x, eq.pIndex.z, eq.id);		
+		TRACELOGD("Updated cell: ground.cells[%i][%i].entityId = %i\n", eq.pIndex.x, eq.pIndex.z, eq.id);		
 	}
 }
 
 void handleMouseButtons() {
-	if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
-		mouseUpdateCameraAngles();
-		mouseUpdateCubeDirection();
-			
-	} else {
-        mouse.prevPosition = (Vector2){ 0.0f, 0.0f };
-    }
 	
+	mouse.position = GetMousePosition();
+
+	if (mouse.cursorHidden) {
+		Vector2 center = { GetScreenWidth() / 2.0f, GetScreenHeight() / 2.0f };
+		mouse.deltaPosition = { mouse.position.x - center.x, mouse.position.y - center.y };
+		SetMousePosition(center.x, center.y);
+		
+	} else if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+            
+		if (mouse.prevPosition.x != 0.0f || mouse.prevPosition.y != 0.0f) {
+			mouse.deltaPosition.x = mouse.position.x - mouse.prevPosition.x;
+			mouse.deltaPosition.y = mouse.position.y - mouse.prevPosition.y;
+		}
+	} 
+	mouse.prevPosition = mouse.position;
+	
+	camera.angleX -= mouse.deltaPosition.x * 0.003f;
+	camera.angleY += mouse.deltaPosition.y * 0.003f;
+	camera.angleY = Clamp(camera.angleY, -1.5*DEG2RAD, PI/2 - 0.3f);
+	
+	mouseUpdateCubeDirection();
+
 	if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !mouse.cursorHidden && ops.editEnabled) {
 		editEntity();
 	}
 }
 
-const float MIN_CAMERA_DISTANCE = 5.0f;  // Minimum zoom distance
-const float MAX_CAMERA_DISTANCE = 100.0f;  // Maximum zoom distance
-const float ZOOM_SPEED = 1.0f;           // Zoom sensitivity
 void handleMouseWheel() {
 	
 	if (!mouse.zoomEnabled) return;
 	// Handle mouse wheel for zoom
 	float mouseWheel = GetMouseWheelMove();
     if (mouseWheel != 0) {
-        camera.distance -= mouseWheel * ZOOM_SPEED;
-        camera.distance = fmax(MIN_CAMERA_DISTANCE, fmin(camera.distance, MAX_CAMERA_DISTANCE));
+        camera.distance -= mouseWheel * mouse.zoomSpeed;
+        camera.distance = fmax(mouse.minZoomDistance, fmin(camera.distance, mouse.maxZoomDistance));
     }
 }
 
@@ -561,16 +591,39 @@ void movePositiveZ() {
 	cube.rotationOrigin.z = cube.position.z + 0.5f; // Back edge
 }
 
-bool hasCollision() {
-	int xi = (int)cube.moveStep.x;
+Entity::Type hasPushboxCollision(int xi, int zi, Entity& e) {
+	int xii = 0, zii = 0;
+	if (xi != 0) xii = xi;
+	else if (zi != 0) zii = zi;
+	bool isEmpty =  ground.cells[cube.pIndex.x + xi + xii][cube.pIndex.z + zi + zii].isEmpty;
+	if (!isEmpty) { // check if pushbox has another entity in the move direction
+		return Entity::OBSTACLE;
+	}
+	
+	cube.pIndex.x += xi;
+	cube.pIndex.z += zi;
+	e.hidden = true;
+	
+	return e.type;
+}
+
+Entity::Type hasCollision() {
+ 	int xi = (int)cube.moveStep.x;
 	int zi = (int)cube.moveStep.z;
 	bool isEmpty =  ground.cells[cube.pIndex.x + xi][cube.pIndex.z + zi].isEmpty;
 	if (isEmpty) {
 		cube.pIndex.x += xi;
 		cube.pIndex.z += zi;
-		return false;
+		return Entity::EMPTY;
 	} 
-	return true;
+
+	int id = ground.cells[cube.pIndex.x + xi][cube.pIndex.z + zi].entityId;
+	Entity& e = entityPool.getEntity(id);
+
+	if (e.type == Entity::OBSTACLE)
+		return Entity::OBSTACLE;
+	
+	return hasPushboxCollision(xi, zi, e);
 }
 
 void calculateCubeMovement(int pressedKey) {
@@ -618,18 +671,36 @@ void calculateCubeMovement(int pressedKey) {
 		}
 	}
 
-	if (hasCollision()) {
+	Entity::Type eType = hasCollision();
+	const char* pushing = 
+		eType == Entity::EMPTY ? "EMPTY" :
+		eType == Entity::PUSHBOX ? "PUSHBOX" :
+		eType == Entity::OTHER ? "OTHER" : "WTF!";
+	TRACELOGD("eType: %s", pushing);
+	
+	if (eType == Entity::OBSTACLE) {
 		playSound(cube.collision);
 		return;
 	}
-	
+
 	cube.nextPosition.x = cube.position.x + cube.moveStep.x;
 	cube.nextPosition.y = cube.position.y + cube.moveStep.y;
 	cube.nextPosition.z = cube.position.z + cube.moveStep.z;
                 
-	cube.rotationAngle = 0.0f;
-	cube.animationProgress = 0.0f;
-	cube.isMoving = true;
+	if (eType == Entity::EMPTY) {
+		cube.rotationAngle = 0.0f;
+		cube.animationProgress = 0.0f;
+		cube.state = Cube::MOVING;
+		return;
+	}
+
+	if (eType == Entity::PUSHBOX || eType == Entity::OTHER) {
+		cube.state = Cube::PUSHING;
+		cube.pushing = eType;
+	}
+	else 
+		cube.state = Cube::QUIET;
+	
 }
 
 void updateCubeMovement(float delta) {
@@ -639,33 +710,71 @@ void updateCubeMovement(float delta) {
 	// Use smooth easing for animation
 	float t = cube.animationProgress;
 	float smoothT = t * t * (3.0f - 2.0f * t); // Smoothstep formula
-                    
-    // Always rotate 90 degrees
-	cube.rotationAngle = 90.0f * smoothT;
-                    
-	Matrix translateToOrigin = MatrixTranslate(-cube.rotationOrigin.x, 
-											   -cube.rotationOrigin.y, 
-											   -cube.rotationOrigin.z);
-	Matrix rotation = MatrixRotate(cube.rotationAxis, cube.rotationAngle * DEG2RAD);
-	Matrix translateBack = MatrixTranslate(cube.rotationOrigin.x, 
-										   cube.rotationOrigin.y, 
-										   cube.rotationOrigin.z);
-                    
-	// Combine matrices: first translate to rotation origin, then rotate, then translate back
-	cube.transform = MatrixMultiply(translateToOrigin, rotation);
-	cube.transform = MatrixMultiply(cube.transform, translateBack);
 
+	
+	if (cube.state == Cube::MOVING) { // rotates
+		// rotate 90 degrees
+		cube.rotationAngle = 90.0f * smoothT;
+                    
+		Matrix translateToOrigin = MatrixTranslate(-cube.rotationOrigin.x, 
+												   -cube.rotationOrigin.y, 
+												   -cube.rotationOrigin.z);
+		Matrix rotation = MatrixRotate(cube.rotationAxis, cube.rotationAngle * DEG2RAD);
+	
+		Matrix translateBack = MatrixTranslate(cube.rotationOrigin.x, 
+											   cube.rotationOrigin.y, 
+											   cube.rotationOrigin.z);
+		// Combine matrices: first translate to rotation origin, then rotate, then translate back
+		cube.transform = MatrixMultiply(translateToOrigin, rotation);
+		cube.transform = MatrixMultiply(cube.transform, translateBack);
+
+	} else if (cube.state == Cube::PUSHING) { // slides from  cube.position to cube.nextPosition
+		cube.position.x = cube.position.x + (cube.nextPosition.x - cube.position.x) * smoothT;
+        cube.position.y = cube.position.y + (cube.nextPosition.y - cube.position.y) * smoothT;
+        cube.position.z = cube.position.z + (cube.nextPosition.z - cube.position.z) * smoothT;
+
+        cube.transform = MatrixTranslate(cube.position.x, 
+                                         cube.position.y, 
+                                         cube.position.z);
+	}
+	
 	if (cube.animationProgress >= 1.0f) {
 
 		cube.pitchChange = KeyDelay::lerpPitch(kb.pressReleaseTime, 0.03f, 0.3f);
 		SetSoundPitch(cube.rollWav, cube.pitchChange);
 		playSound(cube.rollWav);
-		                
+		
 		cube.position = cube.nextPosition;
 		cube.animationProgress = 0.0f;
-		cube.rotationAngle = 0.0f;
-		cube.isMoving = false;
+		
+		if (cube.state == Cube::MOVING)
+			cube.rotationAngle = 0.0f;
+		
+		if (cube.state == Cube::PUSHING) {
+			int id = ground.cells[cube.pIndex.x][cube.pIndex.z].entityId;
+			Entity& e = entityPool.getEntity(id);
+			// TRACELOGD("Cube::PUSHING ended!");
+			// TRACELOGD("cube.pIndex: (%i, %i)", cube.pIndex.x, cube.pIndex.z);
+			// TRACELOGD("e.pIndex: (%i, %i)", e.pIndex.x, e.pIndex.z);
+			
+			PositionIndex increment = { (int)cube.moveStep.x, (int)cube.moveStep.z };
+			e.pIndex = e.pIndex + increment;
+			e.hidden = false;
 
+			// // Check it is updated
+			// Entity e2 = entityPool.getEntity(id);
+			// TRACELOGD("e2.pIndex: (%i, %i)", e2.pIndex.x, e2.pIndex.z);
+			
+			// update ground
+			ground.cells[cube.pIndex.x][cube.pIndex.z].entityId = -1;
+			ground.cells[cube.pIndex.x][cube.pIndex.z].isEmpty = true;
+			ground.cells[e.pIndex.x][e.pIndex.z].entityId = id;
+			ground.cells[e.pIndex.x][e.pIndex.z].isEmpty = false;
+			
+			cube.pushing = Entity::EMPTY;
+		}
+		
+		cube.state = Cube::QUIET;
 	}
 }
 
@@ -726,7 +835,7 @@ void handleKeyboard() {
 		if (!kb.shiftPressed)
 			cube.animationSpeed = KeyDelay::lerpSpeed(t, 0.01f, 0.5f);
 
-		if (!cube.isMoving) { // pressed after a stop
+		if (cube.state == Cube::QUIET) { // pressed after a stop
 			calculateCubeMovement(pressedKey);
 		}
 		else if (!kb.shiftPressed){
@@ -740,8 +849,11 @@ void handleKeyboard() {
 //********** Drawing
 void drawRollingCube() {
 
-	if (cube.isMoving) {
-			
+	if (cube.state == Cube::QUIET) {
+		DrawModel(cube.model, cube.position, 1.0f, cube.facesColor);
+		
+	} else if (cube.state == Cube::MOVING) {
+		
 		rlPushMatrix();
 		{
 			rlMultMatrixf(MatrixToFloat(cube.transform));
@@ -749,13 +861,19 @@ void drawRollingCube() {
 		}
 		rlPopMatrix();
 
-		Vector3 vOffset = Vector3Scale(cube.rotationAxis, 0.2);
-		DrawCylinderEx(Vector3Subtract(cube.rotationOrigin, vOffset),
-					   Vector3Add(cube.rotationOrigin, vOffset),
-					   0.05f, 0.05f, 20, ORANGE);
-				
-	} else {
+		if (cube.state == Cube::MOVING) { // Only show cilinder when rotating
+			Vector3 vOffset = Vector3Scale(cube.rotationAxis, 0.2);
+			DrawCylinderEx(Vector3Subtract(cube.rotationOrigin, vOffset),
+						   Vector3Add(cube.rotationOrigin, vOffset),
+						   0.05f, 0.05f, 20, ORANGE);
+		}
+
+	} else if (cube.state == Cube::PUSHING) {
 		DrawModel(cube.model, cube.position, 1.0f, cube.facesColor);
+		Vector3 pushingCubePos = Vector3Add(cube.position, cube.moveStep);
+		
+		Color color = cube.pushing == Entity::PUSHBOX ? BLUE : GREEN;
+		DrawModel(cube.model, pushingCubePos, 1.0f, color);
 	}
 }
 
@@ -819,7 +937,7 @@ void testLightMovement(float delta) {
 		if (!activationLightTimer.isDone()) {
 			return;
 		}
-		lights[1].position.x = -5.5f;
+		lights[1].position.x = 45.5f;
 		lights[1].enabled = true;
 		moveTimer.start(0.5f);
 		playSound(waveSound[0]);
@@ -849,7 +967,7 @@ float EaseInOut(float t) {
 }
 
 float elapsedTime = 0.0f;
-Vector3 spawnPos = { -1.5f, -0.5f, 0.5f };
+Vector3 spawnPos = { 49.5f, -0.5f, 50.5f };
 void updateSpawnedCube(float delta) {
     if (elapsedTime < 1.0f) { //secs
 		// float t = elapsedTime / duration; // Normalize time [0,1]
@@ -876,13 +994,13 @@ void updateSpawnedCube(float delta) {
 
 //********** Lights
 void createLights() {
-	lights[0] = CreateLight(LIGHT_POINT, { -2.5f, 0.5f, -2.5f }, Vector3Zero(), YELLOW, shader);
-	lights[1] = CreateLight(LIGHT_POINT, { 0.5f, 0.5f, 0.5f }, { 0.0f, 0.0f, 0.0f }, RED, shader);
-	lights[2] = CreateLight(LIGHT_POINT, { -2.5f, 0.5f, 2.5f }, { 0.0f, 0.0f, 0.0f }, BLUE, shader);
-	lights[3] = CreateLight(LIGHT_POINT, { 2.5f, 0.5f, -2.5f }, { 0.0f, 0.0f, 0.0f }, GREEN, shader);
-	lights[4] = CreateLight(LIGHT_DIRECTIONAL, { -5.0f, 2.0f, 5.0f }, { 0.0f, 0.0f, 0.0f }, 
+	lights[0] = CreateLight(LIGHT_POINT, { 47.5f, 0.5f, 47.5f }, Vector3Zero(), YELLOW, shader);
+	lights[1] = CreateLight(LIGHT_POINT, { 50.5f, 0.5f, 50.5f }, { 0.0f, 0.0f, 0.0f }, RED, shader);
+	lights[2] = CreateLight(LIGHT_POINT, { 47.5f, 0.5f, 52.5f }, { 0.0f, 0.0f, 0.0f }, BLUE, shader);
+	lights[3] = CreateLight(LIGHT_POINT, { 52.5f, 0.5f, 47.5f }, { 0.0f, 0.0f, 0.0f }, GREEN, shader);
+	lights[4] = CreateLight(LIGHT_DIRECTIONAL, { 45.0f, 2.0f, 55.0f }, { 50.0f, 0.0f, 50.0f }, 
 							{ 139,146,146,255 }, shader);
-	lights[5] = CreateLight(LIGHT_DIRECTIONAL, { 5.0f, 2.0f, -3.0f }, { 0.0f, 0.0f, 0.0f }, 
+	lights[5] = CreateLight(LIGHT_DIRECTIONAL, { 55.0f, 2.0f, 47.0f }, { 50.0f, 0.0f, 50.0f }, 
 							{ 144, 147, 98, 255 }, shader);
 	
 	TRACELOGD("sizeOf lights: %d", sizeof(lights)/sizeof(Light));
@@ -923,6 +1041,7 @@ void drawLights() {
 
 void imguiMenus();
 void drawText(int margin);
+
 Vector2 fullHD = { 1920, 1080 };
 //********** Main
 int main()
@@ -966,6 +1085,19 @@ int main()
 		ground.cells[idx.x][idx.z].entityId = id;
 		ground.cells[idx.x][idx.z].isEmpty = false;
 	}
+	{
+		PositionIndex idx = { 51, 50 };
+		int id = entityPool.add(idx, Entity::PUSHBOX);
+		ground.cells[idx.x][idx.z].entityId = id;
+		ground.cells[idx.x][idx.z].isEmpty = false;	
+	}
+	{
+		PositionIndex idx = { 53, 50 };
+		int id = entityPool.add(idx, Entity::OTHER);
+		ground.cells[idx.x][idx.z].entityId = id;
+		ground.cells[idx.x][idx.z].isEmpty = false;	
+	}
+
 	
 	activationLightTimer.start(3.0f);
 	
@@ -978,7 +1110,7 @@ int main()
 		handleMouseWheel();
 		handleKeyboard();
 
-		if (cube.isMoving) {
+		if (cube.state != Cube::QUIET) {
 			updateCubeMovement(delta);
 
 		} 
@@ -1023,6 +1155,11 @@ int main()
 				float elapsedTime = GetTime();
 				SetShaderValue(skybox.model.materials[0].shader, timeLoc, &elapsedTime, SHADER_UNIFORM_FLOAT);
 				
+				// temporal fix to change sky direction, but... introduces 2 abrupt rotation points...
+				int dirLoc = GetShaderLocation(skybox.model.materials[0].shader, "direction");
+				float cubeXZdirection[2] = { cube.direction.x, cube.direction.z };
+				SetShaderValue(skybox.model.materials[0].shader, dirLoc, cubeXZdirection, SHADER_UNIFORM_VEC2);				
+				
 				rlDisableBackfaceCulling();
 				rlDisableDepthMask();
 				DrawModel(skybox.model, Vector3Zero(), 1.0f, WHITE);
@@ -1061,9 +1198,16 @@ int main()
 				EndShaderMode();
 
 				for (int i=0; i<entityPool.getCount(); i++) {
-					PositionIndex idx = entityPool.getPositionIndex(i);
-					Vector3 v = getPositionFromIndexes(idx);
-					DrawModel(cube.model, v, 1.0f, RED);
+					Entity e = entityPool.getEntity(i);
+					Vector3 v = getPositionFromIndexes(e.pIndex);
+					
+					Color color = 
+						e.type == Entity::OBSTACLE ? RED :
+						e.type == Entity::PUSHBOX ? BLUE : 
+						GREEN;
+					
+					if (!e.hidden)
+						DrawModel(cube.model, v, 1.0f, color);
 				}
 
 				if (spawnCube) {
@@ -1083,8 +1227,8 @@ int main()
 			// DrawText("F5 - Toggle ground colors", 12, tp + 60, 20, BLACK);
 			if (!mouse.cursorHidden) {
 				imguiMenus();
-				drawText(tp+120);	  
 			}
+			drawText(tp+120);	  
 		}
 		EndDrawing();
 	}
@@ -1135,7 +1279,9 @@ void imguiMenus() {
 	ImGui::Checkbox("ImGui Demo", &ops.demoWindow);
 	ImGui::Checkbox("Sound Enabled", &ops.soundEnabled);
 	ImGui::End();
+
 	
+	// ********* KEYBOARD AND MOUSE ********* 
 	if (ops.inputWindow) {
 		ImGui::Begin("Keyboard & Mouse");
 
@@ -1154,23 +1300,46 @@ void imguiMenus() {
 		ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.3f", cube.pitchChange);
 		ImGui::Spacing();
 	
-		ImGui::SeparatorText("Mouse");
+		ImGui::SeparatorText("Mouse Positions");
 	
+		ImGui::Text("Screen position: (%0.0f, %0.0f)", mouse.position.x, mouse.position.y);
 		Vector3 xzPos = getMouseXZPosition();
-		ImGui::Text("xz position: (%0.2f, %0.2f)", xzPos.x, xzPos.z);
-		PositionIndex pIndex;
-		getMouseXZindexes(pIndex);
-		ImGui::Text("xz Index: (%i, %i)", pIndex.x, pIndex.z);
+		ImGui::Spacing();
+		ImGui::Text("Plane XZ position: (%0.2f, %0.2f)", xzPos.x, xzPos.z);
+		ImGui::Spacing();
+		ImGui::SeparatorText("Mouse Wheel");
 		ImGui::Checkbox("Zoom Enabled", &mouse.zoomEnabled);
+		ImGui::Text("Speed"); ImGui::SameLine();
+		ImGui::DragFloat("##1", (float *)&mouse.zoomSpeed, 0.1f, 0.1f, 10.0f);
+		ImGui::Text("Max distance"); ImGui::SameLine();
+		ImGui::DragFloat("##2", (float *)&mouse.minZoomDistance, 0.1f, 0.1f, 10.0f);
+		ImGui::Text("Min distance"); ImGui::SameLine();
+		ImGui::DragFloat("##3", (float *)&mouse.maxZoomDistance, 1.0f, 10.0f, 1000.0f);
 		ImGui::End();
 	}
 
+	// ********* CUBE AND CAMERA  ********* 
 	if (ops.cubeWindow) {
 		ImGui::Begin("Cube, Camera & Other");
 		ImGui::SeparatorText("Cube");
-		ImGui::Checkbox("isMoving", &cube.isMoving);
+		if (cube.state == Cube::QUIET)
+			ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "QUIET");
+		else if (cube.state == Cube::MOVING)
+			ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "MOVING");
+		else if (cube.state == Cube::PUSHING)
+			ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "PUSHING");
+		else 
+			ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "ERROR");			
+		
 		ImGui::Text("pIndex (ix, iz):"); ImGui::SameLine(140);
 		ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "(%i, %i)", cube.pIndex.x, cube.pIndex.z);
+		
+		const char* pushing = 
+			cube.pushing == Entity::EMPTY ? "EMPTY" :
+			cube.pushing == Entity::PUSHBOX ? "PUSHBOX" :
+			cube.pushing == Entity::OTHER ? "OTHER" : "WTF!";
+		ImGui::Text("pushing: %s", pushing);
+		
 		ImGui::DragFloat3("position", (float *)&cube.position, 1.0f, -1000.0f, 1000.0f);
 		ImGui::DragFloat3("next position", (float *)&cube.nextPosition, 1.0f, -1000.0f, 1000.0f);
 		ImGui::DragFloat3("direction", (float *)&cube.direction, 1.0f, -1000.0f, 1000.0f);
@@ -1201,6 +1370,7 @@ void imguiMenus() {
 		ImGui::End();
 	}
 	
+	// ********* ENTITIES  ********* 
 	if (ops.entitiesWindow) {
 		
 		ImGui::Begin("Entities");
@@ -1251,6 +1421,8 @@ void imguiMenus() {
 			ImGui::Text("EntityId: "); ImGui::SameLine();			
 			ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "-"); ImGui::SameLine(150);
 			ImGui::Text("type: "); ImGui::SameLine(); 
+			ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "-"); ImGui::SameLine(300);
+			ImGui::Text("hidden: "); ImGui::SameLine();
 			ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "-");
 		} else {
 			
@@ -1264,21 +1436,23 @@ void imguiMenus() {
 				Entity e = entityPool.getEntity(cell.entityId);
 				ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.9f, 1.0f), "%i", cell.entityId); ImGui::SameLine(150);
 				ImGui::Text("type: "); ImGui::SameLine();
-				ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.9f, 1.0f), "%s", e.getTypeStr());
+				ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.9f, 1.0f), "%s", e.getTypeStr()); ImGui::SameLine(300);
+				ImGui::Text("hidden: "); ImGui::SameLine();			
+				ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.9f, 1.0f), "%s", e.hidden ? "true" : "false");
 			} else {
 				ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "-"); ImGui::SameLine(150);
 				ImGui::Text("type: "); ImGui::SameLine(); 
+				ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "-"); ImGui::SameLine(300);
+				ImGui::Text("hidden: "); ImGui::SameLine();
 				ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "-");
 			}
-
 		}
 
 		ImGui::Spacing();
 		ImGui::SeparatorText("Other");
-		static int type = 0;
-		ImGui::RadioButton("Obstacle", &type, Entity::OBSTACLE); ImGui::SameLine();
-		ImGui::RadioButton("PushBox", &type, Entity::PUSHBOX); ImGui::SameLine();
-		ImGui::RadioButton("Other", &type, Entity::OTHER);
+		ImGui::RadioButton("Obstacle", &ops.entityType, Entity::OBSTACLE); ImGui::SameLine();
+		ImGui::RadioButton("PushBox", &ops.entityType, Entity::PUSHBOX); ImGui::SameLine();
+		ImGui::RadioButton("Other", &ops.entityType, Entity::OTHER);
 
 		
 		ImGui::Spacing();
@@ -1287,7 +1461,8 @@ void imguiMenus() {
 		ImGui::End();
 	}
 	
-	
+
+	// ********* LIGHTS  ********* 
 	if (ops.lightsWindow) {
 		ImGui::Begin("Lighting");
 		ImGui::SeparatorText("Lights");
@@ -1328,6 +1503,7 @@ void imguiMenus() {
 		ImGui::End();
 	}
 
+	
 	if (ops.demoWindow) {
 		ImGui::ShowDemoWindow(&ops.demoWindow);
 	}
@@ -1335,7 +1511,7 @@ void imguiMenus() {
 }
 
 void drawText(int margin) {
-// 	DrawText(TextFormat("cube.position: {%.2f, %.2f, %.2f}",
-// 						cube.position.x, cube.position.y, cube.position.z),
-// 			 10, margin, 20, BLACK);
+	DrawText(TextFormat("mouse.position: {%.2f, %.2f}",
+						mouse.position.x, mouse.position.y),
+			 10, margin, 20, BLACK);
 }
