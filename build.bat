@@ -9,6 +9,6 @@
 @echo off
 del .\main.exe
 @echo on
-g++ -g -Wall main.cpp -o main.exe -I./rlImGui/src -I ./rlImGui/imgui -I ./rlImGui/imgui/backends -I ./raylib/src -L./rlImGui/src -L./raylib/src -lrlImGui -lraylib -lgdi32 -lwinmm
+g++ -g -Wall log.cpp main.cpp -o main.exe -D_WIN32 -I./rlImGui/src -I ./rlImGui/imgui -I ./rlImGui/imgui/backends -I ./raylib/src -L./rlImGui/src -L./raylib/src -lrlImGui -lraylib -lgdi32 -lwinmm -std=c++20
 @echo off
 .\main.exe

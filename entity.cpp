@@ -8,6 +8,10 @@ struct PositionIndex {
 	PositionIndex operator+(const PositionIndex& other) const {
 		return {x + other.x, z + other.z};
 	}
+	
+	PositionIndex operator*(int scalar) const {
+		return {x * scalar, z * scalar};
+	}
 };
 
 struct EntityQuery {
@@ -15,25 +19,26 @@ struct EntityQuery {
 	int id;
 };
 
+enum BoxType {
+	NONE, OBSTACLE, PUSHBOX, PULLBOX, PUSHPULLBOX, OTHER
+};
+
+const char* getBoxType(BoxType type) {
+	const char* s = 
+		type == NONE ? "NONE" :
+		type == OBSTACLE ? "OBSTACLE" :
+		type == PUSHBOX ? "PUSHBOX" :
+		type == PULLBOX ? "PULLBOX" :
+		type == PUSHPULLBOX ? "PUSHPULLBOX" :
+		"OTHER";
+	return s;
+}
+
 class Entity {
 public:
-	enum Type {
-		EMPTY, OBSTACLE, PUSHBOX, OTHER
-	};
-
-	const char* getTypeStr() {
-		
-		const char* s = 
-			type == OBSTACLE ? "OBSTACLE" : 
-			type == PUSHBOX ? "PUSHBOX" : 
-			"OTHER";
-		return s;
-	}
-	
 	PositionIndex pIndex;
-	Type type;
+	BoxType type;
 	bool hidden;
-
 };
 
 class EntityPool {
@@ -47,7 +52,7 @@ public:
 	PositionIndex getPositionIndex(int id) { return _entity[id].pIndex; }
 	Entity& getEntity(int id) { return _entity[id]; }
 	
-    // Initialize the structure with an initial capacity
+	// Initialize the structure with an initial capacity
 	void init(int capacity) {
 		_capacity = capacity;
 		_count = 0;
@@ -58,7 +63,7 @@ public:
 		}
 	}
 
-    // Resize the entityPool array when _capacity is exceeded
+	// Resize the entityPool array when _capacity is exceeded
 	void expand() {
 		_capacity *= 2;  // Double the _capacity
 		_entity = (Entity*) realloc(_entity, sizeof(Entity) * _capacity);
@@ -68,16 +73,16 @@ public:
 		}
 	}
 
-    // Free the dynamically allocated memory for this
+	// Free the dynamically allocated memory for this
 	void freeEntities() {
-		free(_entity);
-		_entity = NULL;
-		_count = 0;
-		_capacity = 0;
-	}
+free(_entity);
+			_entity = NULL;
+			_count = 0;
+			_capacity = 0;
+		}
 
-    // Add an obstacle to the pool
-	int add(PositionIndex pIndex, Entity::Type type) {
+		// Add an obstacle to the pool
+		int add(PositionIndex pIndex, BoxType type) {
 		if (_count == _capacity) {
 			expand();
 		}

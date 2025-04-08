@@ -1,5 +1,7 @@
 #include "raylib.h"
-#include <cstddef>
+#include "log.h"
+
+// // In case TRACELOGD is needed
 #define SUPPORT_TRACELOG
 #define SUPPORT_TRACELOG_DEBUG
 #include "utils.h"
@@ -12,15 +14,11 @@
 
 #include <math.h>
 #include <stdarg.h>
-#include <stdio.h>
 
 #include "rlights.c"
 #define GLSL_VERSION 330
 
-
-
 //********** Shaders and Textures
-
 Shader shader;
 Vector4 ambient = { 0.1f, 0.1f, 0.1f, 1.0f };
 int ambientLoc;
@@ -186,14 +184,14 @@ struct EditOptions {
 EditOptions ops = {
 	.drawAxis = false,
 	.coloredGround = false,
-	.inputWindow = true,
+	.inputWindow = false,
 	.entitiesWindow = true,
-	.entityType = Entity::OBSTACLE,
-	.cubeWindow = false,
+	.entityType = OBSTACLE,
+	.cubeWindow = true,
 	.lightsWindow = false,
 	.demoWindow = false,
 	.editEnabled = false,
-	.soundEnabled = false,
+	.soundEnabled = true,
 };
 
 
@@ -218,10 +216,12 @@ struct Cube {
 	Matrix transform;
     
 	enum State {
-		QUIET, MOVING, PUSHING
+		QUIET, MOVING, PUSHING, PULLING
 	};
 	State state;
-	Entity::Type pushing;
+	BoxType movingBox;
+	PositionIndex pushingBoxIndex;
+	PositionIndex pullingBoxIndex;
 	
 	float animationProgress;
 	float animationSpeed;
@@ -253,7 +253,7 @@ void initCube() {
 		.transform = MatrixIdentity(),
 
 		.state = Cube::QUIET,
-		.pushing = Entity::EMPTY,
+		.movingBox = NONE,
 		.animationProgress = 0.0f,
 		.animationSpeed = 2.5f,
 
@@ -460,7 +460,7 @@ Vector3 getMouseXZPosition() {
 
 void getMouseXZindexes(PositionIndex& pIndex) {
 	Vector3 xzPos = getMouseXZPosition();
-// TRACELOGD("xzPos: (%.2f, %.2f, %.2f)", xzPos.x, xzPos.y, xzPos.z);
+// LOGD("xzPos: (%.2f, %.2f, %.2f)", xzPos.x, xzPos.y, xzPos.z);
 	if (xzPos.y == -1.0f) {
 		pIndex = { -1, -1 }; // Invalid indexes
 		return;
@@ -472,21 +472,21 @@ void editEntity() {
 	
 	PositionIndex pIndex;
 	getMouseXZindexes(pIndex);
-	TRACELOGD("Entity at pIndex: (%i, %i)", pIndex.x, pIndex.z);
+	LOGD("Entity at pIndex: (%i, %i)", pIndex.x, pIndex.z);
 	if (!isValidPositionIndex(pIndex)) {
-		TRACELOG(LOG_WARNING, ": Invalid pIndex!");
+		LOGW(": Invalid pIndex!");
 		return; // Invalid index
 	}
 		
 	if (ground.cells[pIndex.x][pIndex.z].isEmpty) {
-		int id = entityPool.add(pIndex, (Entity::Type)ops.entityType);
+		int id = entityPool.add(pIndex, (BoxType)ops.entityType);
 		ground.cells[pIndex.x][pIndex.z].entityId = id;
 		ground.cells[pIndex.x][pIndex.z].isEmpty = false;
-		TRACELOGD("Added entity!");			
+		LOGD("Added entity!");			
 			
 	} else {
 		int id = ground.cells[pIndex.x][pIndex.z].entityId;
-		TRACELOGD("entity to swap: %i\n", id);
+		LOGD("entity to swap: %i\n", id);
 		ground.cells[pIndex.x][pIndex.z].entityId = -1;
 		ground.cells[pIndex.x][pIndex.z].isEmpty = true;
 		
@@ -495,7 +495,7 @@ void editEntity() {
 		
 		// store new entityId in the position
 		ground.cells[eq.pIndex.x][eq.pIndex.z].entityId = eq.id;
-		TRACELOGD("Updated cell: ground.cells[%i][%i].entityId = %i\n", eq.pIndex.x, eq.pIndex.z, eq.id);		
+		LOGD("Updated cell: ground.cells[%i][%i].entityId = %i\n", eq.pIndex.x, eq.pIndex.z, eq.id);		
 	}
 }
 
@@ -591,39 +591,64 @@ void movePositiveZ() {
 	cube.rotationOrigin.z = cube.position.z + 0.5f; // Back edge
 }
 
-Entity::Type hasPushboxCollision(int xi, int zi, Entity& e) {
+BoxType getBoxBeyondPushDirection(int xi, int zi) {
 	int xii = 0, zii = 0;
 	if (xi != 0) xii = xi;
 	else if (zi != 0) zii = zi;
 	bool isEmpty =  ground.cells[cube.pIndex.x + xi + xii][cube.pIndex.z + zi + zii].isEmpty;
 	if (!isEmpty) { // check if pushbox has another entity in the move direction
-		return Entity::OBSTACLE;
+		LOGD("OBSTACLE");
+		return OBSTACLE;
 	}
+
+	return NONE;
+}
+
+BoxType getBoxInPushDirection(int xi, int zi) {
 	
-	cube.pIndex.x += xi;
-	cube.pIndex.z += zi;
+	// LOGD("cube.pIndex: (%i, %i)", cube.pIndex.x, cube.pIndex.z);
+	PositionIndex boxIndex = { cube.pIndex.x + xi, cube.pIndex.z+zi };
+	// LOGD("boxIndex: (%i, %i)", boxIndex.x, boxIndex.z);
+	
+	bool isEmpty =  ground.cells[boxIndex.x][boxIndex.z].isEmpty;
+	if (isEmpty) {
+		return NONE;
+	} 
+
+	int id = ground.cells[boxIndex.x][boxIndex.z].entityId;
+	Entity& e = entityPool.getEntity(id);
+
+	if (e.type == OBSTACLE || e.type == PULLBOX) {
+		LOGD("OBSTACLE");
+		return OBSTACLE;
+	}
+
+	if (getBoxBeyondPushDirection(xi, zi) == OBSTACLE) {
+		return OBSTACLE;
+	}
 	e.hidden = true;
-	
+	cube.pushingBoxIndex = boxIndex;
 	return e.type;
 }
 
-Entity::Type hasCollision() {
- 	int xi = (int)cube.moveStep.x;
-	int zi = (int)cube.moveStep.z;
-	bool isEmpty =  ground.cells[cube.pIndex.x + xi][cube.pIndex.z + zi].isEmpty;
-	if (isEmpty) {
-		cube.pIndex.x += xi;
-		cube.pIndex.z += zi;
-		return Entity::EMPTY;
-	} 
-
-	int id = ground.cells[cube.pIndex.x + xi][cube.pIndex.z + zi].entityId;
-	Entity& e = entityPool.getEntity(id);
-
-	if (e.type == Entity::OBSTACLE)
-		return Entity::OBSTACLE;
+BoxType getBoxInPullDirection() {
+	// we already incremented cube.pIndex, so need to get 2 steps back
+	PositionIndex increment = { (int) -cube.moveStep.x, (int) -cube.moveStep.z };
+	PositionIndex boxIndex = cube.pIndex + increment * 2;
+	if (ground.cells[boxIndex.x][boxIndex.z].isEmpty) {
+		return NONE;
+	}
 	
-	return hasPushboxCollision(xi, zi, e);
+	int id = ground.cells[boxIndex.x][boxIndex.z].entityId;
+	Entity& e = entityPool.getEntity(id);
+	
+	if (e.type == PULLBOX || e.type == PUSHPULLBOX) {
+		e.hidden = true;
+		cube.pullingBoxIndex = boxIndex;
+		return e.type;
+	}
+	
+	return NONE; // we don't really care what is there is it is not a pullable box
 }
 
 void calculateCubeMovement(int pressedKey) {
@@ -671,36 +696,140 @@ void calculateCubeMovement(int pressedKey) {
 		}
 	}
 
-	Entity::Type eType = hasCollision();
-	const char* pushing = 
-		eType == Entity::EMPTY ? "EMPTY" :
-		eType == Entity::PUSHBOX ? "PUSHBOX" :
-		eType == Entity::OTHER ? "OTHER" : "WTF!";
-	TRACELOGD("eType: %s", pushing);
+	int xi = (int)cube.moveStep.x;
+	int zi = (int)cube.moveStep.z;
 	
-	if (eType == Entity::OBSTACLE) {
+	BoxType boxInPushDir = getBoxInPushDirection(xi, zi);
+	if (boxInPushDir != NONE) {
+		LOGD("boxInPushDir: %s", getBoxType(boxInPushDir));
+	}
+	
+	if (boxInPushDir == OBSTACLE) {
 		playSound(cube.collision);
 		return;
 	}
 
+	// Movement advance and pIndex increment
 	cube.nextPosition.x = cube.position.x + cube.moveStep.x;
 	cube.nextPosition.y = cube.position.y + cube.moveStep.y;
 	cube.nextPosition.z = cube.position.z + cube.moveStep.z;
-                
-	if (eType == Entity::EMPTY) {
+	cube.pIndex.x += xi;
+	cube.pIndex.z += zi;
+
+	LOGD("Updated cube.pIndex: (%i, %i)", cube.pIndex.x, cube.pIndex.z);
+
+	if (boxInPushDir == NONE) {
+		BoxType boxInPullDir = getBoxInPullDirection();
+		LOGD("boxInPullDir: %s", getBoxType(boxInPullDir));
+		if (boxInPullDir == PULLBOX || boxInPullDir == PUSHPULLBOX) {
+			LOGD("Puuulling!");
+			cube.state = Cube::PULLING;
+			cube.movingBox = boxInPullDir;
+			return;
+		}
+	
 		cube.rotationAngle = 0.0f;
 		cube.animationProgress = 0.0f;
 		cube.state = Cube::MOVING;
 		return;
 	}
 
-	if (eType == Entity::PUSHBOX || eType == Entity::OTHER) {
-		cube.state = Cube::PUSHING;
-		cube.pushing = eType;
+	if (boxInPushDir == PUSHBOX || boxInPushDir == PUSHPULLBOX) {
+		cube.movingBox = boxInPushDir;
+		// Check there is not a PULLBOX in the oppositeMoveStep move direction
+		BoxType boxInPullDir = getBoxInPullDirection();
+		if (boxInPullDir == NONE) {
+			// fine, the PUSHBOX can be pushed
+			LOGD("Puuushiing!");
+			cube.state = Cube::PUSHING;
+			return;
+		} else {
+			// the PUSHBOX can not be pushed if there is a PULLBOX close 
+			// to the player in the opposite moveStep direction, so undo all these stuff
+			int id = ground.cells[cube.pushingBoxIndex.x][cube.pushingBoxIndex.z].entityId;
+			Entity& e = entityPool.getEntity(id);
+			e.hidden = false;
+			id = ground.cells[cube.pullingBoxIndex.x][cube.pullingBoxIndex.z].entityId;
+			e = entityPool.getEntity(id);
+			e.hidden = false;
+			cube.movingBox = NONE;
+            // Undo previous cube.pIndex increment
+			cube.pIndex.x -= xi;
+			cube.pIndex.z -= zi;
+			cube.state = Cube::QUIET;
+			LOGD("Cannot push a PUSHBOX if there is PULLBOX behind me!");
+			return;
+		}
 	}
-	else 
-		cube.state = Cube::QUIET;
 	
+
+	LOGW("Should never arrive here...");
+	// cube.state = Cube::QUIET;
+}
+
+void animationEnded() {
+		
+	cube.pitchChange = KeyDelay::lerpPitch(kb.pressReleaseTime, 0.03f, 0.3f);
+	SetSoundPitch(cube.rollWav, cube.pitchChange);
+	playSound(cube.rollWav);
+		
+	cube.position = cube.nextPosition;
+	cube.animationProgress = 0.0f;
+		
+	if (cube.state == Cube::MOVING) {
+		cube.rotationAngle = 0.0f;
+		
+	} else if (cube.state == Cube::PUSHING) {
+		LOGD("Cube::PUSHING ended!");
+		int id = ground.cells[cube.pIndex.x][cube.pIndex.z].entityId;
+		LOGD("id: %i", id);
+		Entity& e = entityPool.getEntity(id);
+		LOGD("cube.pIndex: (%i, %i)", cube.pIndex.x, cube.pIndex.z);
+		LOGD("e.pIndex: (%i, %i)", e.pIndex.x, e.pIndex.z);
+			
+		PositionIndex increment = { (int)cube.moveStep.x, (int)cube.moveStep.z };
+		e.pIndex = e.pIndex + increment;
+		LOGD("e.pIndex: (%i, %i)", e.pIndex.x, e.pIndex.z);
+		e.hidden = false;
+
+		// Check it is updated
+		Entity& e2 = entityPool.getEntity(id);
+		LOGD("e2.pIndex: (%i, %i)", e2.pIndex.x, e2.pIndex.z);
+			
+		// update ground
+		ground.cells[cube.pIndex.x][cube.pIndex.z].entityId = -1;
+		ground.cells[cube.pIndex.x][cube.pIndex.z].isEmpty = true;
+		ground.cells[e.pIndex.x][e.pIndex.z].entityId = id;
+		ground.cells[e.pIndex.x][e.pIndex.z].isEmpty = false;
+			
+		cube.movingBox = NONE;
+			
+	} else if (cube.state == Cube::PULLING) {
+		LOGD("Cube::PULLING ended!");
+		PositionIndex increment = { (int) cube.moveStep.x, (int) cube.moveStep.z };
+		PositionIndex pullboxIndex = cube.pIndex + increment * -2;
+        // PULLBOX is 2 steps behind of updated cube posIndex, so multiply by -2
+			
+		LOGD("pullboxIndex: (%i, %i)", pullboxIndex.x, pullboxIndex.z);
+		LOGD("cube.pIndex: (%i, %i)", cube.pIndex.x, cube.pIndex.z);
+		
+		int id = ground.cells[pullboxIndex.x][pullboxIndex.z].entityId;
+		Entity& e = entityPool.getEntity(id);
+		LOGD("e.pIndex: (%i, %i)", e.pIndex.x, e.pIndex.z);
+		e.pIndex = e.pIndex + increment;
+		LOGD("e.pIndex: (%i, %i)", e.pIndex.x, e.pIndex.z);
+		e.hidden = false;
+			
+		// update ground
+		ground.cells[pullboxIndex.x][pullboxIndex.z].entityId = -1;
+		ground.cells[pullboxIndex.x][pullboxIndex.z].isEmpty = true;
+		ground.cells[e.pIndex.x][e.pIndex.z].entityId = id;
+		ground.cells[e.pIndex.x][e.pIndex.z].isEmpty = false;
+			
+		cube.movingBox = NONE;
+	}
+		
+	cube.state = Cube::QUIET;
 }
 
 void updateCubeMovement(float delta) {
@@ -728,53 +857,19 @@ void updateCubeMovement(float delta) {
 		cube.transform = MatrixMultiply(translateToOrigin, rotation);
 		cube.transform = MatrixMultiply(cube.transform, translateBack);
 
-	} else if (cube.state == Cube::PUSHING) { // slides from  cube.position to cube.nextPosition
+	} else if (cube.state == Cube::PUSHING || cube.state == Cube::PULLING) {
+		// slides from  cube.position to cube.nextPosition
 		cube.position.x = cube.position.x + (cube.nextPosition.x - cube.position.x) * smoothT;
-        cube.position.y = cube.position.y + (cube.nextPosition.y - cube.position.y) * smoothT;
-        cube.position.z = cube.position.z + (cube.nextPosition.z - cube.position.z) * smoothT;
+		cube.position.y = cube.position.y + (cube.nextPosition.y - cube.position.y) * smoothT;
+		cube.position.z = cube.position.z + (cube.nextPosition.z - cube.position.z) * smoothT;
 
-        cube.transform = MatrixTranslate(cube.position.x, 
-                                         cube.position.y, 
-                                         cube.position.z);
+		cube.transform = MatrixTranslate(cube.position.x, 
+										 cube.position.y, 
+										 cube.position.z);
 	}
 	
 	if (cube.animationProgress >= 1.0f) {
-
-		cube.pitchChange = KeyDelay::lerpPitch(kb.pressReleaseTime, 0.03f, 0.3f);
-		SetSoundPitch(cube.rollWav, cube.pitchChange);
-		playSound(cube.rollWav);
-		
-		cube.position = cube.nextPosition;
-		cube.animationProgress = 0.0f;
-		
-		if (cube.state == Cube::MOVING)
-			cube.rotationAngle = 0.0f;
-		
-		if (cube.state == Cube::PUSHING) {
-			int id = ground.cells[cube.pIndex.x][cube.pIndex.z].entityId;
-			Entity& e = entityPool.getEntity(id);
-			// TRACELOGD("Cube::PUSHING ended!");
-			// TRACELOGD("cube.pIndex: (%i, %i)", cube.pIndex.x, cube.pIndex.z);
-			// TRACELOGD("e.pIndex: (%i, %i)", e.pIndex.x, e.pIndex.z);
-			
-			PositionIndex increment = { (int)cube.moveStep.x, (int)cube.moveStep.z };
-			e.pIndex = e.pIndex + increment;
-			e.hidden = false;
-
-			// // Check it is updated
-			// Entity e2 = entityPool.getEntity(id);
-			// TRACELOGD("e2.pIndex: (%i, %i)", e2.pIndex.x, e2.pIndex.z);
-			
-			// update ground
-			ground.cells[cube.pIndex.x][cube.pIndex.z].entityId = -1;
-			ground.cells[cube.pIndex.x][cube.pIndex.z].isEmpty = true;
-			ground.cells[e.pIndex.x][e.pIndex.z].entityId = id;
-			ground.cells[e.pIndex.x][e.pIndex.z].isEmpty = false;
-			
-			cube.pushing = Entity::EMPTY;
-		}
-		
-		cube.state = Cube::QUIET;
+		animationEnded();
 	}
 }
 
@@ -868,12 +963,25 @@ void drawRollingCube() {
 						   0.05f, 0.05f, 20, ORANGE);
 		}
 
-	} else if (cube.state == Cube::PUSHING) {
+	} else if (cube.state == Cube::PUSHING || cube.state == Cube::PULLING) {
 		DrawModel(cube.model, cube.position, 1.0f, cube.facesColor);
-		Vector3 pushingCubePos = Vector3Add(cube.position, cube.moveStep);
 		
-		Color color = cube.pushing == Entity::PUSHBOX ? BLUE : GREEN;
-		DrawModel(cube.model, pushingCubePos, 1.0f, color);
+		Vector3 otherCubePos;
+		if (cube.state == Cube::PUSHING) {
+			otherCubePos = Vector3Add(cube.position, cube.moveStep);
+		}
+		else if (cube.state == Cube::PULLING) {
+			Vector3 oppositeMoveStep = Vector3Scale(cube.moveStep, -1.0);
+			otherCubePos = Vector3Add(cube.position, oppositeMoveStep);
+		}
+		
+		Color color = 
+			cube.movingBox == PUSHBOX ? BLUE :
+			cube.movingBox == PULLBOX ? GREEN :
+			cube.movingBox == PUSHPULLBOX ? YELLOW:
+			MAGENTA;
+
+		DrawModel(cube.model, otherCubePos, 1.0f, color);
 	}
 }
 
@@ -949,7 +1057,7 @@ void testLightMovement(float delta) {
 	}
 	countTimer++;
 	if (countTimer == 5) {
-		TRACELOGD("testLightMovement: countTimer = 5!");
+		LOGD("testLightMovement: countTimer = 5!");
 		lights[1].enabled = false;
 		countTimer = 0;
 		activationLightTimer.start(3.0f);
@@ -1003,13 +1111,13 @@ void createLights() {
 	lights[5] = CreateLight(LIGHT_DIRECTIONAL, { 55.0f, 2.0f, 47.0f }, { 50.0f, 0.0f, 50.0f }, 
 							{ 144, 147, 98, 255 }, shader);
 	
-	TRACELOGD("sizeOf lights: %d", sizeof(lights)/sizeof(Light));
+	LOGD("sizeOf lights: %d", sizeof(lights)/sizeof(Light));
 	for (int i=0; i<MAX_LIGHTS; i++){
 		const char* type = lights[i].type == INACTIVE ? "INACTIVE" : lights[i].type == LIGHT_DIRECTIONAL ? "DIRECTIONAL" : "POINT";
-		TRACELOGD("lights[%i].type=%s", i, type);
+		LOGD("lights[%i].type=%s", i, type);
 		Vector3 p = lights[i].position;
 		const char* position = TextFormat("x: %f, y:%f, z: %f", p.x, p.y, p.z);
-		TRACELOGD("lights[%i].position=%s", i, position);
+		LOGD("lights[%i].position=%s", i, position);
 		lights[i].enabled = false;
 	}
 	lights[4].enabled = true;
@@ -1046,12 +1154,23 @@ Vector2 fullHD = { 1920, 1080 };
 //********** Main
 int main()
 {
+	
+	EnableANSIColors();
+	printf("Testing colors: \033[0;31mRed\033[0m, \033[0;32mGreen\033[0m, \033[0;34mBlue\033[0m\n");
+	fprintf(stdout, "\033[0;36m HOLA \033[0m \n");
+	
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
     SetTraceLogLevel(LOG_ALL);
 	InitWindow(fullHD.x, fullHD.y, "Cube!");
 	SetWindowPosition(25, 50);
 
-	TRACELOGD("*** Started Cube! ***");
+
+	
+	
+	LOGD("Hello world!");
+	// Fun(LOG_DEBUG,"Hello C++!");
+
+	LOGD("*** Started Cube! ***");
 	
 	SetTargetFPS(60);
 	InitAudioDevice();
@@ -1081,19 +1200,25 @@ int main()
 	
 	PositionIndex initialObstacles[5] = { { 53, 53 }, { 48, 48 }, { 53, 48 }, { 50, 51 }, { 52, 49 } };
 	for (PositionIndex idx : initialObstacles) {
-		int id = entityPool.add(idx, Entity::OBSTACLE);
+		int id = entityPool.add(idx, OBSTACLE);
 		ground.cells[idx.x][idx.z].entityId = id;
 		ground.cells[idx.x][idx.z].isEmpty = false;
 	}
 	{
 		PositionIndex idx = { 51, 50 };
-		int id = entityPool.add(idx, Entity::PUSHBOX);
+		int id = entityPool.add(idx, PUSHBOX);
 		ground.cells[idx.x][idx.z].entityId = id;
 		ground.cells[idx.x][idx.z].isEmpty = false;	
 	}
 	{
-		PositionIndex idx = { 53, 50 };
-		int id = entityPool.add(idx, Entity::OTHER);
+		PositionIndex idx = { 49, 50 };
+		int id = entityPool.add(idx, PULLBOX);
+		ground.cells[idx.x][idx.z].entityId = id;
+		ground.cells[idx.x][idx.z].isEmpty = false;	
+	}
+	{
+		PositionIndex idx = { 54, 52 };
+		int id = entityPool.add(idx, PUSHPULLBOX);
 		ground.cells[idx.x][idx.z].entityId = id;
 		ground.cells[idx.x][idx.z].isEmpty = false;	
 	}
@@ -1202,9 +1327,11 @@ int main()
 					Vector3 v = getPositionFromIndexes(e.pIndex);
 					
 					Color color = 
-						e.type == Entity::OBSTACLE ? RED :
-						e.type == Entity::PUSHBOX ? BLUE : 
-						GREEN;
+						e.type == OBSTACLE ? RED :
+						e.type == PUSHBOX ? BLUE : 
+						e.type == PULLBOX ? GREEN : 
+						e.type == PUSHPULLBOX ? YELLOW : 
+						MAGENTA;
 					
 					if (!e.hidden)
 						DrawModel(cube.model, v, 1.0f, color);
@@ -1234,7 +1361,7 @@ int main()
 	}
 	rlImGuiShutdown();
 
-	TRACELOGD("Ending program!");
+	LOGD("Ending program!");
 	
 	UnloadShader(shader);
 	UnloadShader(skybox.model.materials[0].shader);
@@ -1334,11 +1461,13 @@ void imguiMenus() {
 		ImGui::Text("pIndex (ix, iz):"); ImGui::SameLine(140);
 		ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "(%i, %i)", cube.pIndex.x, cube.pIndex.z);
 		
-		const char* pushing = 
-			cube.pushing == Entity::EMPTY ? "EMPTY" :
-			cube.pushing == Entity::PUSHBOX ? "PUSHBOX" :
-			cube.pushing == Entity::OTHER ? "OTHER" : "WTF!";
-		ImGui::Text("pushing: %s", pushing);
+		const char* movingBox = 
+			cube.movingBox == NONE ? "NONE" :
+			cube.movingBox == PUSHBOX ? "PUSHBOX" :
+			cube.movingBox == PULLBOX ? "PULLBOX" :
+			cube.movingBox == PUSHPULLBOX ? "PUSHPULLBOX" :
+			cube.movingBox == OTHER ? "OTHER" : "WTF!";
+		ImGui::Text("movingBox: %s", movingBox);
 		
 		ImGui::DragFloat3("position", (float *)&cube.position, 1.0f, -1000.0f, 1000.0f);
 		ImGui::DragFloat3("next position", (float *)&cube.nextPosition, 1.0f, -1000.0f, 1000.0f);
@@ -1399,7 +1528,7 @@ void imguiMenus() {
 					ImGui::TableSetColumnIndex(column);
 					if (column == 0) ImGui::Text("%i", id);
 					else if (column == 1) ImGui::Text("(%i, %i)", e.pIndex.x, e.pIndex.z);
-					else ImGui::Text("%s", e.getTypeStr());
+					else ImGui::Text("%s", getBoxType(e.type));
 				}
 			}
 			ImGui::EndTable();
@@ -1436,7 +1565,7 @@ void imguiMenus() {
 				Entity e = entityPool.getEntity(cell.entityId);
 				ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.9f, 1.0f), "%i", cell.entityId); ImGui::SameLine(150);
 				ImGui::Text("type: "); ImGui::SameLine();
-				ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.9f, 1.0f), "%s", e.getTypeStr()); ImGui::SameLine(300);
+				ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.9f, 1.0f), "%s", getBoxType(e.type)); ImGui::SameLine(300);
 				ImGui::Text("hidden: "); ImGui::SameLine();			
 				ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.9f, 1.0f), "%s", e.hidden ? "true" : "false");
 			} else {
@@ -1449,11 +1578,12 @@ void imguiMenus() {
 		}
 
 		ImGui::Spacing();
-		ImGui::SeparatorText("Other");
-		ImGui::RadioButton("Obstacle", &ops.entityType, Entity::OBSTACLE); ImGui::SameLine();
-		ImGui::RadioButton("PushBox", &ops.entityType, Entity::PUSHBOX); ImGui::SameLine();
-		ImGui::RadioButton("Other", &ops.entityType, Entity::OTHER);
-
+		ImGui::SeparatorText("Add/Remove entity");
+		ImGui::RadioButton("Obstacle", &ops.entityType, OBSTACLE); ImGui::SameLine();
+		ImGui::RadioButton("PushBox", &ops.entityType, PUSHBOX); ImGui::SameLine();
+		ImGui::RadioButton("PullBox", &ops.entityType, PULLBOX); ImGui::SameLine();
+		ImGui::RadioButton("PushPullBox", &ops.entityType, PUSHPULLBOX); ImGui::SameLine();
+		ImGui::RadioButton("Other", &ops.entityType, OTHER);
 		
 		ImGui::Spacing();
 		ImGui::Checkbox("editEnabled", &ops.editEnabled);
