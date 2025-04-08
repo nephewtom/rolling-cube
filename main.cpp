@@ -231,7 +231,9 @@ struct Cube {
 
 	Sound rollWav;
 	float pitchChange;
-	Sound collision;
+	Sound collisionSound;
+	Sound pushBoxSound;
+	Sound pullBoxSound;
 };
 Cube cube;
 
@@ -254,6 +256,9 @@ void initCube() {
 
 		.state = Cube::QUIET,
 		.movingBox = NONE,
+		.pushingBoxIndex = {},
+		.pullingBoxIndex = {},
+		
 		.animationProgress = 0.0f,
 		.animationSpeed = 2.5f,
 
@@ -262,7 +267,9 @@ void initCube() {
 
 		.rollWav = LoadSound("assets/sounds/roll.wav"),
 		.pitchChange = 1.0f,
-		.collision = LoadSound("assets/sounds/collision.wav"),
+		.collisionSound = LoadSound("assets/sounds/collision.wav"),
+		.pushBoxSound =  LoadSound("assets/sounds/push.wav"),
+		.pullBoxSound =  LoadSound("assets/sounds/pull.wav"),
 	};
 		
 	getIndexesFromPosition(cube.pIndex, cubeInitPos);
@@ -705,7 +712,7 @@ void calculateCubeMovement(int pressedKey) {
 	}
 	
 	if (boxInPushDir == OBSTACLE) {
-		playSound(cube.collision);
+		playSound(cube.collisionSound);
 		return;
 	}
 
@@ -722,9 +729,10 @@ void calculateCubeMovement(int pressedKey) {
 		BoxType boxInPullDir = getBoxInPullDirection();
 		LOGD("boxInPullDir: %s", getBoxType(boxInPullDir));
 		if (boxInPullDir == PULLBOX || boxInPullDir == PUSHPULLBOX) {
-			LOGD("Puuulling!");
-			cube.state = Cube::PULLING;
+			LOGD("Pulling!");
+			playSound(cube.pullBoxSound);
 			cube.movingBox = boxInPullDir;
+			cube.state = Cube::PULLING;
 			return;
 		}
 	
@@ -740,18 +748,19 @@ void calculateCubeMovement(int pressedKey) {
 		BoxType boxInPullDir = getBoxInPullDirection();
 		if (boxInPullDir == NONE) {
 			// fine, the PUSHBOX can be pushed
-			LOGD("Puuushiing!");
+			LOGD("Pushing!");
+			playSound(cube.pushBoxSound);
 			cube.state = Cube::PUSHING;
 			return;
 		} else {
 			// the PUSHBOX can not be pushed if there is a PULLBOX close 
 			// to the player in the opposite moveStep direction, so undo all these stuff
 			int id = ground.cells[cube.pushingBoxIndex.x][cube.pushingBoxIndex.z].entityId;
-			Entity& e = entityPool.getEntity(id);
-			e.hidden = false;
+			Entity& ePush = entityPool.getEntity(id);
+			ePush.hidden = false;
 			id = ground.cells[cube.pullingBoxIndex.x][cube.pullingBoxIndex.z].entityId;
-			e = entityPool.getEntity(id);
-			e.hidden = false;
+			Entity& ePull = entityPool.getEntity(id);
+			ePull.hidden = false;
 			cube.movingBox = NONE;
             // Undo previous cube.pIndex increment
 			cube.pIndex.x -= xi;
@@ -769,14 +778,15 @@ void calculateCubeMovement(int pressedKey) {
 
 void animationEnded() {
 		
-	cube.pitchChange = KeyDelay::lerpPitch(kb.pressReleaseTime, 0.03f, 0.3f);
-	SetSoundPitch(cube.rollWav, cube.pitchChange);
-	playSound(cube.rollWav);
 		
 	cube.position = cube.nextPosition;
 	cube.animationProgress = 0.0f;
 		
 	if (cube.state == Cube::MOVING) {
+		cube.pitchChange = KeyDelay::lerpPitch(kb.pressReleaseTime, 0.03f, 0.3f);
+		SetSoundPitch(cube.rollWav, cube.pitchChange);
+		playSound(cube.rollWav);
+
 		cube.rotationAngle = 0.0f;
 		
 	} else if (cube.state == Cube::PUSHING) {
@@ -1154,21 +1164,10 @@ Vector2 fullHD = { 1920, 1080 };
 //********** Main
 int main()
 {
-	
-	EnableANSIColors();
-	printf("Testing colors: \033[0;31mRed\033[0m, \033[0;32mGreen\033[0m, \033[0;34mBlue\033[0m\n");
-	fprintf(stdout, "\033[0;36m HOLA \033[0m \n");
-	
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
     SetTraceLogLevel(LOG_ALL);
 	InitWindow(fullHD.x, fullHD.y, "Cube!");
 	SetWindowPosition(25, 50);
-
-
-	
-	
-	LOGD("Hello world!");
-	// Fun(LOG_DEBUG,"Hello C++!");
 
 	LOGD("*** Started Cube! ***");
 	
