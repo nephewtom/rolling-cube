@@ -194,12 +194,61 @@ EditOptions ops = {
 	.soundEnabled = true,
 };
 
-
 void playSound(Sound sound) {
-	if (ops.soundEnabled) {
+	if (ops.soundEnabled) 
 		PlaySound(sound);
-	}
 }
+
+
+//********** Keyboard definitions
+struct Keyboard {
+	int pressedKey;
+	double keyPressTime;
+	double keyReleaseTime;
+	float pressReleaseTime; // Between press and release
+	float lastPressedKeyTime;
+		
+	bool hasQueuedKey;
+	int queuedKey;
+	bool shiftPressed;
+	int shiftCounter;
+	
+	bool instancingEnabled;
+};
+Keyboard kb = {
+    .pressedKey = 0,
+    .keyPressTime = 0.0f,
+    .keyReleaseTime = 0.0f,
+    .pressReleaseTime = 0.0f,
+	.lastPressedKeyTime = 0.0f,
+
+    .hasQueuedKey = false,
+    .queuedKey = 0,
+	.shiftPressed = false,
+	.shiftCounter = 0,
+	
+	.instancingEnabled = true,
+};
+class KeyDelay {
+public:
+    static constexpr float MinSpeed = 1.0f;
+    static constexpr float MaxSpeed = 10.0f;
+
+	// return interpolated speed taking Press/Release time as input
+    static float lerpSpeed(float time, float minTime, float maxTime) {
+        time = Clamp(time, minTime, maxTime);
+        return MinSpeed + (MaxSpeed - MinSpeed) * ((maxTime - time) / (maxTime - minTime));
+    }
+
+    static constexpr float MinPitch = 0.75f;
+    static constexpr float MaxPitch = 2.0f;    
+    static float lerpPitch(float time, float minTime, float maxTime) {
+        time = Clamp(time, minTime, maxTime);
+        return MinPitch + (MaxPitch - MinPitch) * ((maxTime - time) / (maxTime - minTime));
+    }
+    
+};
+
 
 //********** Cube
 struct Cube {
@@ -216,7 +265,7 @@ struct Cube {
 	Matrix transform;
     
 	enum State {
-		QUIET, MOVING, PUSHING, PULLING
+		QUIET, MOVING, PUSHING, PULLING, FAILPUSH
 	};
 	State state;
 	BoxType movingBox;
@@ -231,9 +280,39 @@ struct Cube {
 
 	Sound rollWav;
 	float pitchChange;
-	Sound collisionSound;
-	Sound pushBoxSound;
-	Sound pullBoxSound;
+	Sound collisionWav;
+	Sound pushBoxWav;
+	Sound pullBoxWav;
+	Sound pushFailWav;
+
+	void playSound() {
+		if (!ops.soundEnabled) return;
+	
+		Sound sound = pickSound();
+		if (!kb.shiftPressed || (state != QUIET && state != FAILPUSH)) {
+			PlaySound(sound);
+			kb.shiftCounter = 0;
+			return;
+		}
+	
+		if (kb.shiftCounter % 100 == 0) {
+			PlaySound(sound);
+		}
+		kb.shiftCounter++;
+		if (kb.shiftCounter == 100) kb.shiftCounter = 0;
+	}
+	
+	Sound& pickSound() {
+	
+		switch (state) {
+		case MOVING: return rollWav;
+		case PUSHING: return pushBoxWav;
+		case PULLING: return pullBoxWav;
+		case FAILPUSH: return pushFailWav;
+		case QUIET: return collisionWav;
+		default: return collisionWav;
+		}
+	}
 };
 Cube cube;
 
@@ -267,9 +346,10 @@ void initCube() {
 
 		.rollWav = LoadSound("assets/sounds/roll.wav"),
 		.pitchChange = 1.0f,
-		.collisionSound = LoadSound("assets/sounds/collision.wav"),
-		.pushBoxSound =  LoadSound("assets/sounds/push.wav"),
-		.pullBoxSound =  LoadSound("assets/sounds/pull.wav"),
+		.collisionWav = LoadSound("assets/sounds/collision.wav"),
+		.pushBoxWav =  LoadSound("assets/sounds/push.wav"),
+		.pullBoxWav =  LoadSound("assets/sounds/pull.wav"),
+		.pushFailWav =  LoadSound("assets/sounds/push-fail.wav"),
 	};
 		
 	getIndexesFromPosition(cube.pIndex, cubeInitPos);
@@ -329,53 +409,6 @@ void updateCamera(float delta) {
 }
 
 
-//********** Keyboard definitions
-struct Keyboard {
-	int pressedKey;
-	double keyPressTime;
-	double keyReleaseTime;
-	float pressReleaseTime; // Between press and release
-	float lastPressedKeyTime;
-		
-	bool hasQueuedKey;
-	int queuedKey;
-	bool shiftPressed;
-
-	bool instancingEnabled;
-};
-Keyboard kb = {
-    .pressedKey = 0,
-    .keyPressTime = 0.0f,
-    .keyReleaseTime = 0.0f,
-    .pressReleaseTime = 0.0f,
-	.lastPressedKeyTime = 0.0f,
-
-    .hasQueuedKey = false,
-    .queuedKey = 0,
-	.shiftPressed = false,
-	
-	.instancingEnabled = true,
-};
-class KeyDelay {
-public:
-    static constexpr float MinSpeed = 1.0f;
-    static constexpr float MaxSpeed = 10.0f;
-
-	// return interpolated speed taking Press/Release time as input
-    static float lerpSpeed(float time, float minTime, float maxTime) {
-        time = Clamp(time, minTime, maxTime);
-        return MinSpeed + (MaxSpeed - MinSpeed) * ((maxTime - time) / (maxTime - minTime));
-    }
-
-    static constexpr float MinPitch = 0.75f;
-    static constexpr float MaxPitch = 2.0f;    
-    static float lerpPitch(float time, float minTime, float maxTime) {
-        time = Clamp(time, minTime, maxTime);
-        return MinPitch + (MaxPitch - MinPitch) * ((maxTime - time) / (maxTime - minTime));
-    }
-    
-};
-
 //********** Mouse definitions & functions
 struct Mouse {
 	Vector2 position;
@@ -402,21 +435,8 @@ Mouse mouse = {
 	.maxZoomDistance = 100.0f,
 };
 
-void mouseUpdateCameraAngles() {
-	
-	Vector2 center = { GetScreenWidth() / 2.0f, GetScreenHeight() / 2.0f };
 
-	mouse.position = GetMousePosition();
-            
-	mouse.deltaPosition = { mouse.position.x - center.x, mouse.position.y - center.y };
 
-	// Update camera angles based on mouse movement
-	camera.angleX -= mouse.deltaPosition.x * 0.003f;
-	camera.angleY += mouse.deltaPosition.y * 0.003f;
-	camera.angleY = Clamp(camera.angleY, -1.5*DEG2RAD, PI/2 - 0.3f);
-
-	SetMousePosition(center.x, center.y);
-}
 
 void mouseUpdateCubeDirection() {
 	// Calculate camera direction vector (normalized)
@@ -506,6 +526,8 @@ void editEntity() {
 	}
 }
 
+const float MAX_ANGLE_Y = 89.0f * DEG2RAD;
+const float MIN_ANGLE_Y = -1.5f * DEG2RAD;
 void handleMouseButtons() {
 	
 	mouse.position = GetMousePosition();
@@ -526,7 +548,7 @@ void handleMouseButtons() {
 	
 	camera.angleX -= mouse.deltaPosition.x * 0.003f;
 	camera.angleY += mouse.deltaPosition.y * 0.003f;
-	camera.angleY = Clamp(camera.angleY, -1.5*DEG2RAD, PI/2 - 0.3f);
+	camera.angleY = Clamp(camera.angleY, MIN_ANGLE_Y, MAX_ANGLE_Y);
 	
 	mouseUpdateCubeDirection();
 
@@ -534,6 +556,7 @@ void handleMouseButtons() {
 		editEntity();
 	}
 }
+
 
 void handleMouseWheel() {
 	
@@ -712,7 +735,8 @@ void calculateCubeMovement(int pressedKey) {
 	}
 	
 	if (boxInPushDir == OBSTACLE) {
-		playSound(cube.collisionSound);
+		cube.state = Cube::QUIET;
+		cube.playSound();
 		return;
 	}
 
@@ -730,9 +754,9 @@ void calculateCubeMovement(int pressedKey) {
 		LOGD("boxInPullDir: %s", getBoxType(boxInPullDir));
 		if (boxInPullDir == PULLBOX || boxInPullDir == PUSHPULLBOX) {
 			LOGD("Pulling!");
-			playSound(cube.pullBoxSound);
-			cube.movingBox = boxInPullDir;
 			cube.state = Cube::PULLING;
+			cube.playSound();
+			cube.movingBox = boxInPullDir;
 			return;
 		}
 	
@@ -749,10 +773,12 @@ void calculateCubeMovement(int pressedKey) {
 		if (boxInPullDir == NONE) {
 			// fine, the PUSHBOX can be pushed
 			LOGD("Pushing!");
-			playSound(cube.pushBoxSound);
 			cube.state = Cube::PUSHING;
+			cube.playSound();
 			return;
 		} else {
+			cube.state = Cube::FAILPUSH;
+			cube.playSound();
 			// the PUSHBOX can not be pushed if there is a PULLBOX close 
 			// to the player in the opposite moveStep direction, so undo all these stuff
 			int id = ground.cells[cube.pushingBoxIndex.x][cube.pushingBoxIndex.z].entityId;
@@ -765,8 +791,9 @@ void calculateCubeMovement(int pressedKey) {
             // Undo previous cube.pIndex increment
 			cube.pIndex.x -= xi;
 			cube.pIndex.z -= zi;
-			cube.state = Cube::QUIET;
 			LOGD("Cannot push a PUSHBOX if there is PULLBOX behind me!");
+			cube.nextPosition = cube.position;
+			cube.state = Cube::QUIET;
 			return;
 		}
 	}
@@ -778,14 +805,13 @@ void calculateCubeMovement(int pressedKey) {
 
 void animationEnded() {
 		
-		
 	cube.position = cube.nextPosition;
 	cube.animationProgress = 0.0f;
 		
 	if (cube.state == Cube::MOVING) {
 		cube.pitchChange = KeyDelay::lerpPitch(kb.pressReleaseTime, 0.03f, 0.3f);
 		SetSoundPitch(cube.rollWav, cube.pitchChange);
-		playSound(cube.rollWav);
+		cube.playSound();
 
 		cube.rotationAngle = 0.0f;
 		
@@ -1171,7 +1197,7 @@ int main()
 
 	LOGD("*** Started Cube! ***");
 	
-	SetTargetFPS(60);
+	// SetTargetFPS(60);
 	InitAudioDevice();
 	initWave();
 
