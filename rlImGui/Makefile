@@ -14,7 +14,7 @@ SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui
 OBJS = $(addsuffix .o, $(basename $(notdir $(SOURCES))))
 
 
-# Per OS/platform in case it is needed
+# NOT TESTED: Per OS/platform in case it is needed
 ifeq ($(UNAME_S), Linux) #LINUX
 	ECHO_MESSAGE = "Linux"
 endif
@@ -39,7 +39,7 @@ CXXFLAGS += -DDEBUG -DPLATFORM_DESKTOP -DGRAPHICS_API_OPENGL_33 -DIMGUI_DISABLE_
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 all: $(RL_LIB)
-	@echo Building $(RL_LIB)
+	@echo Building $(RL_LIB) on $(ECHO_MESSAGE)
 
 $(RL_LIB): $(OBJS)
 	$(AR) -rcs $@ $^
