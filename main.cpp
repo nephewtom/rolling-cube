@@ -18,6 +18,9 @@
 #include "rlights.c"
 #define GLSL_VERSION 330
 
+
+float delta = 0.0f;
+
 //********** Shaders and Textures
 Shader shader;
 Vector4 ambient = { 0.1f, 0.1f, 0.1f, 1.0f };
@@ -211,7 +214,7 @@ struct Keyboard {
 	bool hasQueuedKey;
 	int queuedKey;
 	bool shiftPressed;
-	int shiftCounter;
+	float shiftTimer;
 	
 	bool instancingEnabled;
 };
@@ -225,7 +228,7 @@ Keyboard kb = {
     .hasQueuedKey = false,
     .queuedKey = 0,
 	.shiftPressed = false,
-	.shiftCounter = 0,
+	.shiftTimer = 0.0f,
 	
 	.instancingEnabled = true,
 };
@@ -291,15 +294,16 @@ struct Cube {
 		Sound sound = pickSound();
 		if (!kb.shiftPressed || (state != QUIET && state != FAILPUSH)) {
 			PlaySound(sound);
-			kb.shiftCounter = 0;
+			kb.shiftTimer = 0.0f;
 			return;
 		}
+		
+		kb.shiftTimer += delta;
 	
-		if (kb.shiftCounter % 100 == 0) {
+		if (kb.shiftTimer >= 0.5f) {
 			PlaySound(sound);
+			kb.shiftTimer = 0.0f;
 		}
-		kb.shiftCounter++;
-		if (kb.shiftCounter == 100) kb.shiftCounter = 0;
 	}
 	
 	Sound& pickSound() {
@@ -390,7 +394,7 @@ void initCamera() {
 	camera.angleY = asinf(cameraOffset.y / camera.distance);
 }
 
-void updateCamera(float delta) {
+void updateCamera() {
 
 	// Update camera position based cube position on angles from mouse
 	camera.c3d.target = Vector3Lerp(camera.c3d.target, cube.nextPosition, cube.animationSpeed * delta);
@@ -868,7 +872,7 @@ void animationEnded() {
 	cube.state = Cube::QUIET;
 }
 
-void updateCubeMovement(float delta) {
+void updateCubeMovement() {
 
 	cube.animationProgress += delta * cube.animationSpeed;
 
@@ -1074,7 +1078,7 @@ int countTimer = 0;
 bool spawnCube = false;
 bool spawnDirUp = true;
 Light lights[MAX_LIGHTS];
-void testLightMovement(float delta) {
+void testLightMovement() {
 
 	if (activationLightTimer.isEnabled()) {
 		activationLightTimer.update(delta);
@@ -1112,7 +1116,7 @@ float EaseInOut(float t) {
 
 float elapsedTime = 0.0f;
 Vector3 spawnPos = { 49.5f, -0.5f, 50.5f };
-void updateSpawnedCube(float delta) {
+void updateSpawnedCube() {
     if (elapsedTime < 1.0f) { //secs
 		// float t = elapsedTime / duration; // Normalize time [0,1]
         // cubePosition.y = startY + t * (endY - startY); // Lerp formula
@@ -1254,25 +1258,25 @@ int main()
 	rlImGuiSetup(true);
 	while (!WindowShouldClose()) // Main game loop
 	{
-		float delta = GetFrameTime();
+		delta = GetFrameTime();
 
 		handleMouseButtons();
 		handleMouseWheel();
 		handleKeyboard();
 
 		if (cube.state != Cube::QUIET) {
-			updateCubeMovement(delta);
+			updateCubeMovement();
 
 		} 
 		else if (kb.hasQueuedKey) {
 			calculateCubeMovement(kb.queuedKey);
-			updateCubeMovement(delta);
+			updateCubeMovement();
 			
 			if (!kb.shiftPressed)
 				kb.hasQueuedKey = false;
 		}
 
-		updateCamera(delta);
+		updateCamera();
 
 		// Update the shader with the camera view vector (points towards { 0.0f, 0.0f, 0.0f })
 		float cameraPos[3] = { camera.c3d.position.x, camera.c3d.position.y, camera.c3d.position.z };
@@ -1285,9 +1289,9 @@ int main()
 			UpdateLightValues(shader, lights[i]);
 		}
 
-		testLightMovement(delta);
+		testLightMovement();
 		if (spawnCube) {
-			updateSpawnedCube(delta);
+			updateSpawnedCube();
 		}
 		
 		if (IsFileDropped()) {
