@@ -1,0 +1,5 @@
+CompileFlags:
+  Add: [-I/Users/swamiom/playground/raylib/rolling-cube/raylib/src, 
+        -I/Users/swamiom/playground/raylib/rolling-cube/rlImgui/src,
+        -I/Users/swamiom/playground/raylib/rolling-cube/rlImGui/imgui,
+        -std=c++20]
