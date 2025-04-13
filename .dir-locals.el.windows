@@ -1,0 +1,15 @@
+((c-mode . ((lsp-clients-clangd-args . ("--compile-commands-dir=d:/playground/raylib/trayimg"
+                                        "-isystem=C:/mingw-w64/x86_64-8.1.0-win32-seh-rt_v6-rev0/mingw64/include"
+                                        "-isystem=C:/mingw-w64/x86_64-8.1.0-win32-seh-rt_v6-rev0/mingw64/x86_64-w64-mingw32/include"
+                                        "--header-insertion=never"
+                                        "--log=verbose"
+                                        "--no-system-includes"))))
+
+
+ (c++-mode . ((lsp-clients-clangd-args . ("--compile-commands-dir=d:/playground/raylib/trayimg"
+                                          "-isystem=C:/mingw-w64/x86_64-8.1.0-win32-seh-rt_v6-rev0/mingw64/include"
+                                          "-isystem=C:/mingw-w64/x86_64-8.1.0-win32-seh-rt_v6-rev0/mingw64/x86_64-w64-mingw32/include"
+                                          "--header-insertion=never"
+                                          "--no-system-includes"
+                                          "--log=verbose"
+                                          )))))

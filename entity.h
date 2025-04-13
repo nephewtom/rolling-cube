@@ -1,4 +1,6 @@
-#include "utils.h"
+#ifndef ENTITY_H
+#define ENTITY_H
+
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -112,3 +114,4 @@ free(_entity);
 
 };
 
+#endif

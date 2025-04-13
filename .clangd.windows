@@ -1,0 +1,8 @@
+CompileFlags:
+  Add: [
+    "-I", "C:/w64devkit/x86_64-w64-mingw32/include",
+    "-I", "C:/w64devkit/lib/gcc/x86_64-w64-mingw32/14.2.0/include",
+    "-I", "C:/w64devkit/lib/gcc/x86_64-w64-mingw32/14.2.0/include/c++",
+    "-I", "C:/w64devkit/lib/gcc/x86_64-w64-mingw32/14.2.0/include/c++/x86_64-w64-mingw32",
+    "-std=c++20"
+  ]

@@ -8,6 +8,7 @@ uniform samplerCube environmentMap;
 uniform bool vflipped;
 uniform bool doGamma;
 uniform float time;
+uniform vec2 direction;
 
 // Output fragment color
 out vec4 finalColor;
@@ -25,16 +26,24 @@ mat3 rotateY(float angle) {
 
 void main()
 {
-	float angle = time * 0.003;
+	float angle = 0.0;
+	// temporal fix to change sky direction, but... introduces 2 abrupt rotation points...
+	if (direction.x == -1.0 || direction.y == 1.0) {
+		angle = time * 0.003;
+	}
+	else {
+		angle = -time * 0.003;
+	}
+		
 	vec3 rotatedPos = rotateY(angle) * fragPosition;
 	
 	// Fetch color from texture map
 	vec3 color = vec3(0.0);
 
-    // if (vflipped) color = texture(environmentMap, vec3(fragPosition.x, -fragPosition.y, fragPosition.z)).rgb;
-    // else color = texture(environmentMap, fragPosition).rgb;
+	// if (vflipped) color = texture(environmentMap, vec3(fragPosition.x, -fragPosition.y, fragPosition.z)).rgb;
+	// else color = texture(environmentMap, fragPosition).rgb;
 
-    if (vflipped)
+	if (vflipped)
 		color = texture(environmentMap, vec3(rotatedPos.x, -rotatedPos.y, rotatedPos.z)).rgb;
     else
 		color = texture(environmentMap, rotatedPos).rgb;
