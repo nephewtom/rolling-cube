@@ -13,13 +13,15 @@ EntityPool entityPool;
 // ****** Shaders and Textures
 #include "shader_lights.cpp"
 ShaderLightsData sld;
-Vector4 ambient = { 0.1f, 0.1f, 0.1f, 1.0f };
-int ambientLoc;
 
 // ****** Ground 
 #include "ground.h"
 Ground ground;
 
+
+#include "cube.h"
+Cube cube;
+CubeCamera camera;
 
 // ****** Input
 #include "input.h"
@@ -93,7 +95,7 @@ Vector3 getPositionFromIndexes(PositionIndex& pIndex) {
 
 bool isValidPositionIndex(PositionIndex& pIndex) {
 	
-	return !(pIndex.x < 0 || pIndex.x > Ground::X_CELLS-1 || pIndex.z < 0 || pIndex.z > Ground::Z_CELLS - 1);
+	return !(pIndex.x < 0 || pIndex.x > ground.width - 1 || pIndex.z < 0 || pIndex.z > ground.height - 1);
 }	
 
 Vector3 getMouseXZPosition(Camera& camera) {

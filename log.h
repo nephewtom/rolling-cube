@@ -24,7 +24,7 @@ extern const char* lYellow;
 extern const char* lPurple;
 extern const char* lGreen;
 
-void LogImpl(int logLevel, const std::source_location location, const char* format, ...)
+inline void LogImpl(int logLevel, const std::source_location location, const char* format, ...)
 {
 	EnableANSIColors();
     
@@ -80,7 +80,6 @@ void LogImpl(int logLevel, const std::source_location location, const char* form
     // If fatal logging, exit program
     /* if (logLevel == LOG_FATAL) exit(EXIT_FAILURE); */
 }
-
 
 // Macro to be used for logging
 #define Log(level, format, ...) LogImpl(level, std::source_location::current(), format, ##__VA_ARGS__)

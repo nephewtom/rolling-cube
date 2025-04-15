@@ -1,18 +1,10 @@
-// In case TRACELOGD is needed
-#define SUPPORT_TRACELOG
-#define SUPPORT_TRACELOG_DEBUG
-#include "utils.h"
-
 #include "raylib.h"
 #include "raymath.h"
 #include "rlgl.h"
 
-#define GLSL_VERSION 330
-
 #include "log.h"
 #include "globals.cpp"
 #include "skybox.cpp"
-
 #include "cube.cpp"
 
 #ifndef NO_IMGUI
@@ -27,7 +19,7 @@ Vector3 spawnPos = { 49.5f, -0.5f, 50.5f };
 void updateSpawnedCube();
 
 void initWave();
-void setInitialEntities();
+PositionIndex setupMap();
 void handleMouseButtons();
 void handleMouseWheel();
 void handleKeyboard();
@@ -42,7 +34,6 @@ int screenHeight = fullHD.y;
 
 int main()
 {
-	
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
     SetTraceLogLevel(LOG_ALL);
 	InitWindow(screenWidth, screenHeight, "Cube!");
@@ -60,34 +51,29 @@ int main()
 
 	sld.loadShader();
 	sld.loadLogo();
-	// loadShader();
-	// loadLogo();
-	
-	// createLights();
 	sld.createLights();
 	
 	Skybox skybox;
 	skybox.load();
 
 	ground.init(sld.shader, sld.logo);
-	Vector3 cubeInitPos = {50.5f, 0.51f, 50.5f};
-	initCube(cubeInitPos);
-	initCamera(cubeInitPos);
+	entityPool.init(1000);
+	PositionIndex initPos = setupMap();
+	
+	Vector3 cubeInitPos = { initPos.x + 0.5f, 0.51f, initPos.z+ 0.5f};
+	cube.init(cubeInitPos);
+	camera.init(cubeInitPos);
 
 	int instancing = 0;
 	int instancingLoc = GetShaderLocation(sld.shader, "instancing");
 	SetShaderValue(sld.shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
 
-
-	// Entities
-	entityPool.init(100);
-	setInitialEntities();
-	
 	activationLightTimer.start(3.0f);
 	
 #ifndef NO_IMGUI
 	rlImGuiSetup(true);
 #endif
+
 	while (!WindowShouldClose()) // Main game loop
 	{
 		delta = GetFrameTime();
@@ -107,14 +93,14 @@ int main()
 				kb.hasQueuedKey = false;
 		}
 
-		updateCubeCamera();
+		camera.update();
 
 		// Update the shader with the camera view vector (points towards { 0.0f, 0.0f, 0.0f })
 		float cameraPos[3] = { camera.c3d.position.x, camera.c3d.position.y, camera.c3d.position.z };
 		SetShaderValue(sld.shader, sld.shader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
 
 
-		SetShaderValue(sld.shader, ambientLoc, &ambient, SHADER_UNIFORM_VEC4);
+		SetShaderValue(sld.shader, sld.ambientLoc, &sld.ambient, SHADER_UNIFORM_VEC4);
 
 		sld.updateLights();
 
@@ -124,7 +110,31 @@ int main()
 		}
 		
 		if (IsFileDropped()) {
-			skybox.update();
+			FilePathList droppedFiles = LoadDroppedFiles();
+			if (droppedFiles.count == 1) {// Only support one file 
+				if (IsFileExtension(droppedFiles.paths[0], ".png")) {
+					
+					ground.clearGroundMap();
+					entityPool.freeEntities();
+					
+					ground.loadGroundMap(droppedFiles.paths[0]);
+					entityPool.init(500);
+					
+					PositionIndex pi = setupMap();
+					cube.pIndex = pi;
+					cube.position = { pi.x + 0.5f, 0.51f, pi.z+ 0.5f};
+					camera.c3d.position = Vector3Add(cube.position, Vector3({9.5f, 2.5f, 0.5f}));
+					camera.c3d.target = cube.position;
+
+					cube.animationProgress = 0.0f;
+					cube.nextPosition = cube.position;
+					updateCubeMovement();
+					
+				} else if (IsFileExtension(droppedFiles.paths[0], ".hdr")) {
+					skybox.update();
+				}
+			}
+			UnloadDroppedFiles(droppedFiles);
 		}
 		
 		BeginDrawing();
@@ -475,32 +485,47 @@ void updateSpawnedCube() {
 	}
 }
 
+void fillGroundWithEntities() {
+
+}
+
 // ****** Entities (Obstacles, Pushbox, etc)
-void setInitialEntities() {
-	PositionIndex initialObstacles[5] = { { 53, 53 }, { 48, 48 }, { 53, 48 }, { 50, 51 }, { 52, 49 } };
-	for (PositionIndex idx : initialObstacles) {
-		int id = entityPool.add(idx, OBSTACLE);
-		ground.cells[idx.x][idx.z].entityId = id;
-		ground.cells[idx.x][idx.z].isEmpty = false;
+PositionIndex setupMap() {
+
+	LOGD("Setting map with: width=%i, height=%i", ground.width, ground.height);
+	PositionIndex cubePi = { 0, 0 };
+	int i=0;
+	for (int ix = 0; ix < ground.width; ix++) {
+		for (int iz = 0; iz < ground.height; iz++) {
+			ground.transforms[i] = MatrixTranslate(ix + 0.5f, 0.0f, iz + 0.5f);
+			
+			PositionIndex pi = { ix, iz };
+			ground.cells[ix][iz].isEmpty = false;
+			int id = -1;
+			int colorIndex = ix + iz*ground.width;
+			Color color = ground.pixelMap[colorIndex];
+			if (ColorIsEqual(color, { 255, 0, 0, 255})) {
+				id = entityPool.add(pi, OBSTACLE);			
+			} else if (ColorIsEqual(color, { 0, 255, 0, 255})) {
+				id = entityPool.add(pi, PULLBOX);
+			} else if (ColorIsEqual(color, { 0, 0, 255, 255})) {
+				id = entityPool.add(pi, PUSHBOX);
+			} else if (ColorIsEqual(color, { 255, 255, 0, 255})) {
+				id = entityPool.add(pi, PUSHPULLBOX);
+			} else {
+				ground.cells[ix][iz].isEmpty = true;
+				if (ColorIsEqual(color, { 0, 0, 0, 255})) {
+					cubePi = pi;
+				}
+			}
+			ground.cells[ix][iz].entityId = id;
+		   
+			ground.cells[ix][iz].color = ground.getRandomColor();
+			i++;
+		}
 	}
-	{
-		PositionIndex idx = { 51, 50 };
-		int id = entityPool.add(idx, PUSHBOX);
-		ground.cells[idx.x][idx.z].entityId = id;
-		ground.cells[idx.x][idx.z].isEmpty = false;	
-	}
-	{
-		PositionIndex idx = { 49, 50 };
-		int id = entityPool.add(idx, PULLBOX);
-		ground.cells[idx.x][idx.z].entityId = id;
-		ground.cells[idx.x][idx.z].isEmpty = false;	
-	}
-	{
-		PositionIndex idx = { 54, 52 };
-		int id = entityPool.add(idx, PUSHPULLBOX);
-		ground.cells[idx.x][idx.z].entityId = id;
-		ground.cells[idx.x][idx.z].isEmpty = false;	
-	}
+	
+	return cubePi;
 }
 
 void drawEntities() {

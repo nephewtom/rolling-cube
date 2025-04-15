@@ -1,34 +1,35 @@
 #ifndef GROUND_H
 #define GROUND_H
 
+#include "log.h"
 #include "raylib.h"
-#include "raymath.h"
 #include "rlgl.h"
 
 #include <assert.h> // gets rid of Emacs Flycheck complain in RL_CALLOC
 
-#define GLSL_VERSION 330
-
-class Cell {
-public:
+struct Cell {
 	bool isEmpty;
 	int entityId;
 	Color color;
 };
 struct Ground {
+	
 	Mesh plane;
 	Model model;
 	Material material;
-	Matrix *transforms;
-	static const int X_CELLS = 199;
-	static const int Z_CELLS = 199;
-	Cell cells[X_CELLS][Z_CELLS];
-
 	int instancingLoc;
 	
+	// static const int X_CELLS = 199;
+	// static const int Z_CELLS = 199;
+	Color* pixelMap; // map of pixels that will generate the game level map
+	int width;    // width of the map
+	int height;   // height of the map
+	Cell **cells; // map of entities
+	Matrix *transforms;
+
+	
 	void init(Shader& shader, Texture& texture) {
-		instancingLoc = GetShaderLocation(shader, "instancing");
-		
+
 		plane = GenMeshPlane(1.0f,1.0f,1,1);
 		model = LoadModelFromMesh(plane);
 		model.materials[0].shader = shader;
@@ -39,22 +40,45 @@ struct Ground {
 		material = LoadMaterialDefault();
 		material.shader = shader;
 		material.maps[MATERIAL_MAP_DIFFUSE].texture = texture;
+		instancingLoc = GetShaderLocation(shader, "instancing");		
 
-		transforms = (Matrix *)RL_CALLOC(X_CELLS*Z_CELLS, sizeof(Matrix));
+		loadGroundMap("./assets/200x200-map.png");
+		LOGD("Finished!");
+	}
+
+	void loadGroundMap(const char* filename) {
+		Image mapImage = LoadImage(filename);
+		Texture2D texMap = LoadTextureFromImage(mapImage);
+		width = texMap.width;
+		height = texMap.height;
+		LOGD("map size: width=%i, height%i", width, height);
+		pixelMap = LoadImageColors(mapImage);
+		UnloadImage(mapImage);
 		
-		int i=0;
-		for (int ix = 0, xCoord = 0; ix < X_CELLS; ix++, xCoord++) {
-			for (int iz = 0, zCoord = 0; iz < Z_CELLS; iz++, zCoord++) {
-				transforms[i] = MatrixTranslate(xCoord + 0.5f, 0.0f, zCoord + 0.5f);
-			
-				cells[ix][iz].isEmpty = true;
-				cells[ix][iz].entityId = -1;
-				cells[ix][iz].color = getRandomColor();
-				i++;
-			}
-		}	
+		allocGround();
 	}
 	
+	void allocGround() {
+		transforms = (Matrix *)RL_CALLOC(width * height, sizeof(Matrix));
+		cells = (Cell **)RL_CALLOC(width, sizeof(Cell*)); // Allocate row pointers
+		for (int i = 0; i < width; i++) {
+			cells[i] = (Cell *)RL_CALLOC(height, sizeof(Cell)); // Allocate each row
+		}	
+	}
+		
+	void clearGroundMap() {
+		UnloadImageColors(pixelMap);
+		freeGround();
+	}
+	
+	void freeGround() {
+		for (int i = 0; i < width; i++) {
+			RL_FREE(cells[i]);
+		}
+		RL_FREE(cells);
+		RL_FREE(transforms);
+	}
+
 	Color getRandomColor() {
 		return (Color){
 			(unsigned char) GetRandomValue(0, 255), // Red
@@ -66,9 +90,9 @@ struct Ground {
 	
 	void drawColored() {
 		float fx = 0;
-		for (int x = 0; x < X_CELLS; x++, fx++) {
+		for (int x = 0; x < width; x++, fx++) {
 			float fz = 0;
-			for (int z = 0; z < Z_CELLS; z++, fz++) {
+			for (int z = 0; z < height; z++, fz++) {
 				DrawTriangle3D({fx, 0.0f, fz}, {fx, 0.0f, fz+1}, {fx+1, 0.0f, fz+1}, cells[x][z].color);
 				DrawTriangle3D({fx+1, 0.0f, fz+1}, {fx+1, 0.0f, fz}, {fx, 0.0f, fz}, cells[x][z].color);
 			}
@@ -79,10 +103,9 @@ struct Ground {
 		int instancing = 1;
 		SetShaderValue(shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
 		BeginShaderMode(shader);
-		DrawMeshInstanced(plane, material, transforms, X_CELLS*Z_CELLS);
+		DrawMeshInstanced(plane, material, transforms, width*height);
 		EndShaderMode();
 	}
-	
 };
 
 

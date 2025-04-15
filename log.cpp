@@ -22,3 +22,5 @@ extern "C" void EnableANSIColors() {
     SetConsoleMode(hOut, dwMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 }
 #endif
+
+

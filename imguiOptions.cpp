@@ -228,7 +228,7 @@ void imguiMenus(Cube& cube, CubeCamera& camera) {
 	if (ops.lightsWindow) {
 		ImGui::Begin("Lighting");
 		ImGui::SeparatorText("Lights");
-		ImGui::ColorEdit4("ambient", &ambient.x);
+		ImGui::ColorEdit4("ambient", &sld.ambient.x);
 		ImGui::Text("lightsCount:"); ImGui::SameLine(180);
 		ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%i", sld.lightsCount);
 		ImVec4 lightColor[6];

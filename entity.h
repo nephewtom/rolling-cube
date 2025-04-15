@@ -77,14 +77,14 @@ public:
 
 	// Free the dynamically allocated memory for this
 	void freeEntities() {
-free(_entity);
-			_entity = NULL;
-			_count = 0;
-			_capacity = 0;
-		}
+		free(_entity);
+		_entity = NULL;
+		_count = 0;
+		_capacity = 0;
+	}
 
-		// Add an obstacle to the pool
-		int add(PositionIndex pIndex, BoxType type) {
+	// Add an obstacle to the pool
+	int add(PositionIndex pIndex, BoxType type) {
 		if (_count == _capacity) {
 			expand();
 		}

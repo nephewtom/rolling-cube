@@ -1,50 +1,77 @@
-#include "log.h"
-#include "cube.h"
+#include "globals.cpp"
 
 //********** Cube & Camera
-Cube cube;
-void initCube(Vector3 initPos) {
+void Cube::init(Vector3 initPos) {
 
-	cube = {
-		.model = LoadModelFromMesh(GenMeshCube(1,1,1)),
-		.pIndex = {},
-		.position = initPos,
-		.nextPosition = initPos,
-		.direction = {-1.0f, 0.0f, 0.0f},
-		.moveStep = {0.0f, 0.0f, 0.0f},
+	model = LoadModelFromMesh(GenMeshCube(1,1,1));
+	pIndex = {};
+	position = initPos;
+	nextPosition = initPos;
+	direction = {-1.0f, 0.0f, 0.0f};
+	moveStep = {0.0f, 0.0f, 0.0f};
 
-		.rotationAxis = {0.0f, 0.0f, 1.0f},
-		.rotationOrigin = {0.0f, 0.0f, 1.0f},
-		.rotationAngle = 0.0f,
-		.transform = MatrixIdentity(),
+	rotationAxis = {0.0f, 0.0f, 1.0f};
+	rotationOrigin = {0.0f, 0.0f, 1.0f};
+	rotationAngle = 0.0f;
+	transform = MatrixIdentity();
 
-		.state = Cube::QUIET,
-		.movingBox = NONE,
-		.pushingBoxIndex = {},
-		.pullingBoxIndex = {},
+	state = Cube::QUIET;
+	movingBox = NONE;
+	pushingBoxIndex = {};
+	pullingBoxIndex = {};
 		
-		.animationProgress = 0.0f,
-		.animationSpeed = 2.5f,
+	animationProgress = 0.0f;
+	animationSpeed = 2.5f;
 
-		.facesColor = WHITE,
-		.wiresColor = GREEN,
+	facesColor = WHITE;
+	wiresColor = GREEN;
 
-		.rollWav = LoadSound("assets/sounds/roll.wav"),
-		.pitchChange = 1.0f,
-		.collisionWav = LoadSound("assets/sounds/collision.wav"),
-		.pushBoxWav =  LoadSound("assets/sounds/push.wav"),
-		.pullBoxWav =  LoadSound("assets/sounds/pull.wav"),
-		.pushFailWav =  LoadSound("assets/sounds/push-fail.wav"),
-	};
+	rollWav = LoadSound("assets/sounds/roll.wav");
+	pitchChange = 1.0f;
+	collisionWav = LoadSound("assets/sounds/collision.wav");
+	pushBoxWav =  LoadSound("assets/sounds/push.wav");
+	pullBoxWav =  LoadSound("assets/sounds/pull.wav");
+	pushFailWav =	LoadSound("assets/sounds/push-fail.wav");
 		
-	getIndexesFromPosition(cube.pIndex, initPos);
-	cube.model.materials[0].shader = sld.shader;
-	cube.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sld.logo;
+	getIndexesFromPosition(pIndex, initPos);
+	model.materials[0].shader = sld.shader;
+	model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sld.logo;
 }
 
-CubeCamera camera;
-void initCamera(Vector3 initPos) {
-	camera.c3d = {
+void Cube::playSound() {
+
+	if (!ops.soundEnabled) return;
+	
+	Sound& sound = pickSound();
+	if (!kb.shiftPressed || (state != QUIET && state != FAILPUSH)) {
+		PlaySound(sound);
+		kb.shiftTimer = 0.0f;
+		return;
+	}
+		
+	kb.shiftTimer += delta;
+	
+	if (kb.shiftTimer >= 0.5f) {
+		PlaySound(sound);
+		kb.shiftTimer = 0.0f;
+	}
+}
+	
+Sound& Cube::pickSound() {
+	
+	switch (state) {
+	case MOVING: return rollWav;
+	case PUSHING: return pushBoxWav;
+	case PULLING: return pullBoxWav;
+	case FAILPUSH: return pushFailWav;
+	case QUIET: return collisionWav;
+	default: return collisionWav;
+	}
+}
+
+
+void CubeCamera::init(Vector3 initPos) {
+	c3d = {
 		.position = Vector3Add(initPos, Vector3({9.5f, 2.5f, 0.5f})),
 		.target = initPos,
 		.up = (Vector3){0.0f, 1.0f, 0.0f},
@@ -54,26 +81,26 @@ void initCamera(Vector3 initPos) {
 
 	// Camera orbit parameters
 	Vector3 cameraOffset = { 
-		camera.c3d.position.x - camera.c3d.target.x,
-		camera.c3d.position.y - camera.c3d.target.y,
-		camera.c3d.position.z - camera.c3d.target.z
+		c3d.position.x - c3d.target.x,
+		c3d.position.y - c3d.target.y,
+		c3d.position.z - c3d.target.z
 	};
-	camera.distance = sqrtf(cameraOffset.x * cameraOffset.x +
-							cameraOffset.y * cameraOffset.y +
-							cameraOffset.z * cameraOffset.z);
+	distance = sqrtf(cameraOffset.x * cameraOffset.x +
+					 cameraOffset.y * cameraOffset.y +
+					 cameraOffset.z * cameraOffset.z);
 
-	camera.angleX = atan2f(cameraOffset.x, cameraOffset.z);
-	camera.angleY = asinf(cameraOffset.y / camera.distance);
+	angleX = atan2f(cameraOffset.x, cameraOffset.z);
+	angleY = asinf(cameraOffset.y / distance);
 }
 
-void updateCubeCamera() {
+void CubeCamera::update() {
 
 	// Update camera position based cube position on angles from mouse
-	camera.c3d.target = Vector3Lerp(camera.c3d.target, cube.nextPosition, cube.animationSpeed * delta);
+	c3d.target = Vector3Lerp(c3d.target, cube.nextPosition, cube.animationSpeed * delta);
 
-	camera.c3d.position.x = camera.c3d.target.x + camera.distance * cosf(camera.angleY) * sinf(camera.angleX);
-	camera.c3d.position.y = camera.c3d.target.y + camera.distance * sinf(camera.angleY);
-	camera.c3d.position.z = camera.c3d.target.z + camera.distance * cosf(camera.angleY) * cosf(camera.angleX);
+	c3d.position.x = c3d.target.x + distance * cosf(angleY) * sinf(angleX);
+	c3d.position.y = c3d.target.y + distance * sinf(angleY);
+	c3d.position.z = c3d.target.z + distance * cosf(angleY) * cosf(angleX);
 
 // 	if (!camera.freeLight) {
 // 		camera.light.target = Vector3Lerp(camera.light.target, cube.nextPosition, cube.animationSpeed * delta);
@@ -248,8 +275,8 @@ void calculateCubeMovement(int pressedKey) {
 	int xi = (int)cube.moveStep.x;
 	int zi = (int)cube.moveStep.z;
 
-	if (cube.pIndex.x + xi < 1 || cube.pIndex.x+xi > ground.X_CELLS - 2 ||
-		cube.pIndex.z + zi < 1 || cube.pIndex.z+zi > ground.Z_CELLS - 2) {
+	if (cube.pIndex.x + xi < 1 || cube.pIndex.x+xi > ground.width - 2 ||
+		cube.pIndex.z + zi < 1 || cube.pIndex.z+zi > ground.height - 2) {
 		LOGW("Limit cube.pIndex: (%i, %i)", cube.pIndex.x, cube.pIndex.z);
 		cube.state = Cube::QUIET;
 		cube.playSound();

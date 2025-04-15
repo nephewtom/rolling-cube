@@ -2,7 +2,7 @@
 #define CUBE_H
 
 #include "raylib.h"
-#include "globals.cpp"
+#include "entity.h"
 
 struct Cube {
 	
@@ -39,35 +39,9 @@ struct Cube {
 	Sound pullBoxWav;
 	Sound pushFailWav;
 
-	void playSound() {
-		if (!ops.soundEnabled) return;
-	
-		Sound& sound = pickSound();
-		if (!kb.shiftPressed || (state != QUIET && state != FAILPUSH)) {
-			PlaySound(sound);
-			kb.shiftTimer = 0.0f;
-			return;
-		}
-		
-		kb.shiftTimer += delta;
-	
-		if (kb.shiftTimer >= 0.5f) {
-			PlaySound(sound);
-			kb.shiftTimer = 0.0f;
-		}
-	}
-	
-	Sound& pickSound() {
-	
-		switch (state) {
-		case MOVING: return rollWav;
-		case PUSHING: return pushBoxWav;
-		case PULLING: return pullBoxWav;
-		case FAILPUSH: return pushFailWav;
-		case QUIET: return collisionWav;
-		default: return collisionWav;
-		}
-	}
+	void init(Vector3 v);
+	void playSound();
+	Sound& pickSound();
 };
 
 struct CubeCamera {
@@ -76,6 +50,9 @@ struct CubeCamera {
 	Vector3 direction;
 	float angleX;
 	float angleY;
+	
+	void init(Vector3 v);
+	void update();
 };
 
 #endif
