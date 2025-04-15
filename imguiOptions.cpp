@@ -230,26 +230,26 @@ void imguiMenus(Cube& cube, CubeCamera& camera) {
 		ImGui::SeparatorText("Lights");
 		ImGui::ColorEdit4("ambient", &ambient.x);
 		ImGui::Text("lightsCount:"); ImGui::SameLine(180);
-		ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%i", lightsCount);
+		ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%i", sld.lightsCount);
 		ImVec4 lightColor[6];
 		for (int i=0; i<=5; i++) {
-			const char* type = (lights[i].type == LIGHT_POINT ? "Point" : "Directional");
+			const char* type = (sld.lights[i].type == LIGHT_POINT ? "Point" : "Directional");
 			const char* lightName = TextFormat("Light %i - %s", i, type);
 			if (ImGui::CollapsingHeader( lightName)) {
 				const char* posStr = TextFormat("position##%i", i);
 				const char* colorStr = TextFormat("color##%i", i);
 				const char* enableStr = TextFormat("enable##%i", i);
 				const char* hiddenStr = TextFormat("hidden##%i", i);
-				ImGui::Checkbox(enableStr, &lights[i].enabled);ImGui::SameLine(140);
-				ImGui::Checkbox(hiddenStr, &lights[i].hidden);
-				ImGui::DragFloat3(posStr, (float *)&lights[i].position, 0.5f, -20.0f, 20.0f);
-				lightColor[i] = RaylibColorToImVec4(lights[i].color);
+				ImGui::Checkbox(enableStr, &sld.lights[i].enabled);ImGui::SameLine(140);
+				ImGui::Checkbox(hiddenStr, &sld.lights[i].hidden);
+				ImGui::DragFloat3(posStr, (float *)&sld.lights[i].position, 0.5f, -20.0f, 20.0f);
+				lightColor[i] = RaylibColorToImVec4(sld.lights[i].color);
 				if (ImGui::ColorEdit4(colorStr, &lightColor[i].x)) {
-					lights[i].color = ImVec4ToRaylibColor(lightColor[i]);
+					sld.lights[i].color = ImVec4ToRaylibColor(lightColor[i]);
 				}
-				if (lights[i].type == LIGHT_DIRECTIONAL) {
+				if (sld.lights[i].type == LIGHT_DIRECTIONAL) {
 					const char* targetStr = TextFormat("target##%i", i);
-					ImGui::DragFloat3(targetStr, (float *)&lights[i].target, 0.5f, -100.0f, 100.0f);
+					ImGui::DragFloat3(targetStr, (float *)&sld.lights[i].target, 0.5f, -100.0f, 100.0f);
 				}
 				ImGui::Spacing();
 			}

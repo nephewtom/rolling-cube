@@ -15,8 +15,6 @@
 
 #include "cube.cpp"
 
-
-
 #ifndef NO_IMGUI
 #include "imguiOptions.cpp"
 #endif
@@ -238,8 +236,8 @@ void testLightMovement() {
 		if (!activationLightTimer.isDone()) {
 			return;
 		}
-		lights[1].position.x = 45.5f;
-		lights[1].enabled = true;
+		sld.lights[1].position.x = 45.5f;
+		sld.lights[1].enabled = true;
 		moveTimer.start(0.5f);
 		playSound(waveSound[0]);
 	}
@@ -251,7 +249,7 @@ void testLightMovement() {
 	countTimer++;
 	if (countTimer == 5) {
 		LOGD("testLightMovement: countTimer = 5!");
-		lights[1].enabled = false;
+		sld.lights[1].enabled = false;
 		countTimer = 0;
 		activationLightTimer.start(3.0f);
 		spawnCube = true;
@@ -259,7 +257,7 @@ void testLightMovement() {
 		return;
 	}
 	playSound(waveSound[countTimer]);
-	lights[1].position.x += 1.0f;
+	sld.lights[1].position.x += 1.0f;
 	moveTimer.start();
 }
 
@@ -292,52 +290,6 @@ void updateSpawnedCube() {
 		}
 	}
 }
-
-//********** Lights
-void createLights() {
-	lights[0] = CreateLight(LIGHT_POINT, { 47.5f, 0.5f, 47.5f }, Vector3Zero(), YELLOW, shader);
-	lights[1] = CreateLight(LIGHT_POINT, { 50.5f, 0.5f, 50.5f }, { 0.0f, 0.0f, 0.0f }, RED, shader);
-	lights[2] = CreateLight(LIGHT_POINT, { 47.5f, 0.5f, 52.5f }, { 0.0f, 0.0f, 0.0f }, BLUE, shader);
-	lights[3] = CreateLight(LIGHT_POINT, { 52.5f, 0.5f, 47.5f }, { 0.0f, 0.0f, 0.0f }, GREEN, shader);
-	lights[4] = CreateLight(LIGHT_DIRECTIONAL, { 45.0f, 2.0f, 55.0f }, { 50.0f, 0.0f, 50.0f }, 
-							{ 139,146,146,255 }, shader);
-	lights[5] = CreateLight(LIGHT_DIRECTIONAL, { 55.0f, 2.0f, 47.0f }, { 50.0f, 0.0f, 50.0f }, 
-							{ 144, 147, 98, 255 }, shader);
-	
-	LOGD("sizeOf lights: %d", sizeof(lights)/sizeof(Light));
-	for (int i=0; i<MAX_LIGHTS; i++){
-		const char* type = lights[i].type == INACTIVE ? "INACTIVE" : lights[i].type == LIGHT_DIRECTIONAL ? "DIRECTIONAL" : "POINT";
-		LOGD("lights[%i].type=%s", i, type);
-		Vector3 p = lights[i].position;
-		const char* position = TextFormat("x: %f, y:%f, z: %f", p.x, p.y, p.z);
-		LOGD("lights[%i].position=%s", i, position);
-		lights[i].enabled = false;
-	}
-	lights[4].enabled = true;
-	lights[5].enabled = true;
-}
-
-void drawLights() {
-	// Draw spheres to show where the lights are
-	for (int i = 0; i < MAX_LIGHTS; i++)
-	{
-		if (lights[i].type == INACTIVE) continue;
-		if (lights[i].hidden == true) continue;
-
-		if (lights[i].enabled)  {
-			DrawSphereEx(lights[i].position, 0.2f, 8, 8, lights[i].color);
-		}
-		else { 
-			DrawSphereWires(lights[i].position, 0.2f, 8, 8, ColorAlpha(lights[i].color, 0.3f));
-		}
-			
-		if (lights[i].type == LIGHT_DIRECTIONAL) {
-			DrawLine3D(lights[i].position, lights[i].target, lights[i].color);
-			DrawSphereWires(lights[i].target, 0.021f, 4, 4, lights[i].color);
-		}
-	}
-}
-
 
 // ****** Entities (Obstacles, Pushbox, etc)
 void setInitialEntities() {
@@ -393,6 +345,7 @@ int screenHeight = fullHD.y;
 
 int main()
 {
+	
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
     SetTraceLogLevel(LOG_ALL);
 	InitWindow(screenWidth, screenHeight, "Cube!");
@@ -408,19 +361,25 @@ int main()
 		HideCursor();
 	}
 
-	loadShader();
-	loadLogo();
-	createLights();
+	sld.loadShader();
+	sld.loadLogo();
+	// loadShader();
+	// loadLogo();
+	
+	// createLights();
+	sld.createLights();
+	
 	Skybox skybox;
-	loadSkybox(skybox);
+	skybox.load();
 
-	ground.init(shader, logo);
-	initCube();
-	initCamera();
+	ground.init(sld.shader, sld.logo);
+	Vector3 cubeInitPos = {50.5f, 0.51f, 50.5f};
+	initCube(cubeInitPos);
+	initCamera(cubeInitPos);
 
 	int instancing = 0;
-	int instancingLoc = GetShaderLocation(shader, "instancing");
-	SetShaderValue(shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
+	int instancingLoc = GetShaderLocation(sld.shader, "instancing");
+	SetShaderValue(sld.shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
 
 
 	// Entities
@@ -455,14 +414,12 @@ int main()
 
 		// Update the shader with the camera view vector (points towards { 0.0f, 0.0f, 0.0f })
 		float cameraPos[3] = { camera.c3d.position.x, camera.c3d.position.y, camera.c3d.position.z };
-		SetShaderValue(shader, shader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
+		SetShaderValue(sld.shader, sld.shader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
 
 
-		SetShaderValue(shader, ambientLoc, &ambient, SHADER_UNIFORM_VEC4);
-		
-		for (int i = 0; i < MAX_LIGHTS; i++) {
-			UpdateLightValues(shader, lights[i]);
-		}
+		SetShaderValue(sld.shader, ambientLoc, &ambient, SHADER_UNIFORM_VEC4);
+
+		sld.updateLights();
 
 		testLightMovement();
 		if (spawnCube) {
@@ -470,51 +427,30 @@ int main()
 		}
 		
 		if (IsFileDropped()) {
-			updateSkybox(skybox);
+			skybox.update();
 		}
 		
 		BeginDrawing();
 		{
 			ClearBackground(BLACK);
-			// ClearBackground(RAYWHITE);
 
 			BeginMode3D(camera.c3d);
 			{
-				{ // Draw skybox
-					int timeLoc = GetShaderLocation(skybox.model.materials[0].shader, "time");
-					float elapsedTime = GetTime();
-					SetShaderValue(skybox.model.materials[0].shader, timeLoc, &elapsedTime, SHADER_UNIFORM_FLOAT);
+				skybox.draw(cube.direction);
 				
-					// temporal fix to change sky direction, but... introduces 2 abrupt rotation points...
-					int dirLoc = GetShaderLocation(skybox.model.materials[0].shader, "direction");
-					float cubeXZdirection[2] = { cube.direction.x, cube.direction.z };
-					SetShaderValue(skybox.model.materials[0].shader, dirLoc, cubeXZdirection, SHADER_UNIFORM_VEC2);
-				
-					rlDisableBackfaceCulling();
-					rlDisableDepthMask();
-					DrawModel(skybox.model, Vector3Zero(), 1.0f, WHITE);
-					rlEnableBackfaceCulling();
-					rlEnableDepthMask();
-				}
-				
-				if (ops.drawAxis) {
-					drawAxis();
-				}
-				
-				// Draw Ground
+				// Draw Ground & axis
 				if (ops.coloredGround) {
 					ground.drawColored();
 				} else {
-					ground.drawInstances(shader);
+					ground.drawInstances(sld.shader);
 				}
-				
-				// Draw Cube & texture sample
-				{
-					// Since shader is applied to models...  the 2 BeginShaderMode() calls
-					// in ground.drawInstances and the following are not needed...
-					BeginShaderMode(shader);
+				if (ops.drawAxis) {
+					drawAxis();
+				}
+
+				{// Draw Cube & texture sample
 					instancing = 0;
-					SetShaderValue(shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
+					SetShaderValue(sld.shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
 				
 					// Draw several planes with ground texture to check its appearance
 					DrawModel(ground.model, {-2.5f,0.05,-2.5f}, 1.0f, RED);
@@ -523,7 +459,6 @@ int main()
 					DrawModel(ground.model, {-4.5f,0.05,-3.5f}, 1.0f, RED);
 
 					drawRollingCube();
-					EndShaderMode();
 				}
 				
 				// Draw entities, spawn cube and lights
@@ -531,7 +466,7 @@ int main()
 				if (spawnCube) {
 					DrawModel(cube.model, spawnPos, 1.0f, MAGENTA);
 				}				
-				drawLights();
+				sld.drawLights();
 
 			}
 			EndMode3D();
@@ -549,7 +484,7 @@ int main()
 			}
 #endif
 
-			drawText(tp+120);
+			// drawText(tp+120);
 		}
 		EndDrawing();
 	}
@@ -558,7 +493,7 @@ int main()
 #endif
 	LOGD("Ending program!");
 	
-	UnloadShader(shader);
+	UnloadShader(sld.shader);
 	UnloadShader(skybox.model.materials[0].shader);
 	UnloadTexture(skybox.model.materials[0].maps[MATERIAL_MAP_CUBEMAP].texture);
 	UnloadModel(skybox.model);

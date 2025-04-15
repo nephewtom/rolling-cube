@@ -9,11 +9,6 @@
 
 #define GLSL_VERSION 330
 
-const int X_CELLS = 199;
-const int Z_CELLS = 199;
-const int BEGIN_CELL_POS = 0;
-const int END_CELL_POS = 199;
-
 class Cell {
 public:
 	bool isEmpty;
@@ -25,6 +20,8 @@ struct Ground {
 	Model model;
 	Material material;
 	Matrix *transforms;
+	static const int X_CELLS = 199;
+	static const int Z_CELLS = 199;
 	Cell cells[X_CELLS][Z_CELLS];
 
 	int instancingLoc;
@@ -46,8 +43,8 @@ struct Ground {
 		transforms = (Matrix *)RL_CALLOC(X_CELLS*Z_CELLS, sizeof(Matrix));
 		
 		int i=0;
-		for (int ix = 0, xCoord = BEGIN_CELL_POS; ix < X_CELLS; ix++, xCoord++) {
-			for (int iz = 0, zCoord = BEGIN_CELL_POS; iz < Z_CELLS; iz++, zCoord++) {
+		for (int ix = 0, xCoord = 0; ix < X_CELLS; ix++, xCoord++) {
+			for (int iz = 0, zCoord = 0; iz < Z_CELLS; iz++, zCoord++) {
 				transforms[i] = MatrixTranslate(xCoord + 0.5f, 0.0f, zCoord + 0.5f);
 			
 				cells[ix][iz].isEmpty = true;
@@ -68,9 +65,9 @@ struct Ground {
 	}
 	
 	void drawColored() {
-		float fx = BEGIN_CELL_POS;
+		float fx = 0;
 		for (int x = 0; x < X_CELLS; x++, fx++) {
-			float fz = BEGIN_CELL_POS;
+			float fz = 0;
 			for (int z = 0; z < Z_CELLS; z++, fz++) {
 				DrawTriangle3D({fx, 0.0f, fz}, {fx, 0.0f, fz+1}, {fx+1, 0.0f, fz+1}, cells[x][z].color);
 				DrawTriangle3D({fx+1, 0.0f, fz+1}, {fx+1, 0.0f, fz}, {fx, 0.0f, fz}, cells[x][z].color);

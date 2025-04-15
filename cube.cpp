@@ -1,16 +1,15 @@
+#include "log.h"
 #include "cube.h"
 
 //********** Cube & Camera
-
 Cube cube;
-Vector3 cubeInitPos = {50.5f, 0.51f, 50.5f};
-void initCube() {
+void initCube(Vector3 initPos) {
 
 	cube = {
 		.model = LoadModelFromMesh(GenMeshCube(1,1,1)),
 		.pIndex = {},
-		.position = cubeInitPos,
-		.nextPosition = cubeInitPos,
+		.position = initPos,
+		.nextPosition = initPos,
 		.direction = {-1.0f, 0.0f, 0.0f},
 		.moveStep = {0.0f, 0.0f, 0.0f},
 
@@ -38,16 +37,16 @@ void initCube() {
 		.pushFailWav =  LoadSound("assets/sounds/push-fail.wav"),
 	};
 		
-	getIndexesFromPosition(cube.pIndex, cubeInitPos);
-	cube.model.materials[0].shader = shader;
-	cube.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logo;
+	getIndexesFromPosition(cube.pIndex, initPos);
+	cube.model.materials[0].shader = sld.shader;
+	cube.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sld.logo;
 }
 
 CubeCamera camera;
-void initCamera() {
+void initCamera(Vector3 initPos) {
 	camera.c3d = {
-		.position = Vector3Add(cubeInitPos, Vector3({9.5f, 2.5f, 0.5f})),
-		.target = cubeInitPos,
+		.position = Vector3Add(initPos, Vector3({9.5f, 2.5f, 0.5f})),
+		.target = initPos,
 		.up = (Vector3){0.0f, 1.0f, 0.0f},
 		.fovy = 45.0f,
 		.projection = CAMERA_PERSPECTIVE,
@@ -248,6 +247,15 @@ void calculateCubeMovement(int pressedKey) {
 
 	int xi = (int)cube.moveStep.x;
 	int zi = (int)cube.moveStep.z;
+
+	if (cube.pIndex.x + xi < 1 || cube.pIndex.x+xi > ground.X_CELLS - 2 ||
+		cube.pIndex.z + zi < 1 || cube.pIndex.z+zi > ground.Z_CELLS - 2) {
+		LOGW("Limit cube.pIndex: (%i, %i)", cube.pIndex.x, cube.pIndex.z);
+		cube.state = Cube::QUIET;
+		cube.playSound();
+		return;
+	}
+	
 	
 	BoxType boxInPushDir = getBoxInPushDirection(xi, zi);
 	if (boxInPushDir != NONE) {
@@ -271,7 +279,7 @@ void calculateCubeMovement(int pressedKey) {
 
 	if (boxInPushDir == NONE) {
 		BoxType boxInPullDir = getBoxInPullDirection();
-		LOGD("boxInPullDir: %s", getBoxType(boxInPullDir));
+		// LOGD("boxInPullDir: %s", getBoxType(boxInPullDir));
 		if (boxInPullDir == PULLBOX || boxInPullDir == PUSHPULLBOX) {
 			LOGD("Pulling!");
 			cube.state = Cube::PULLING;
