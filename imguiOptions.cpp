@@ -1,10 +1,11 @@
+#ifndef NO_IMGUI
+
 #include "imgui.h"
 #include "rlImGui.h"
 
 #include "globals.cpp"
-#include "cube.h"
 
-#include "lights.h"
+#include "cube.h"
 
 //********** ImGui & DrawText stuff
 ImVec4 RaylibColorToImVec4(Color column) {
@@ -218,7 +219,7 @@ void imguiMenus(Cube& cube, CubeCamera& camera) {
 		
 		ImGui::Spacing();
 		ImGui::Checkbox("editEnabled", &ops.editEnabled);
-
+		
 		ImGui::End();
 	}
 	
@@ -270,3 +271,4 @@ void imguiMenus(Cube& cube, CubeCamera& camera) {
 	}
 	rlImGuiEnd();
 }
+#endif

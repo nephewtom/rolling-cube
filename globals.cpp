@@ -68,12 +68,14 @@ struct ImguiOptions {
 ImguiOptions ops = {
 	.drawAxis = false,
 	.coloredGround = false,
+	
 	.inputWindow = false,
 	.entitiesWindow = true,
 	.entityType = OBSTACLE,
 	.cubeWindow = true,
 	.lightsWindow = false,
 	.demoWindow = false,
+	
 	.editEnabled = false,
 	.soundEnabled = false,
 };
