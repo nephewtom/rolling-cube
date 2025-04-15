@@ -1,3 +1,5 @@
+#ifndef TIMER_CPP
+#define TIMER_CPP
 #include "utils.h"
 
 class Timer {
@@ -42,4 +44,4 @@ public:
 		return true;
 	}
 };
-
+#endif
