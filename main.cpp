@@ -26,6 +26,7 @@ void handleKeyboard();
 void drawEntities();
 void drawAxis();
 void drawText(int margin);
+void loadNewMap(const char* name);
 
 //********** Main
 Vector2 fullHD = { 1920, 1080 };
@@ -35,7 +36,7 @@ int screenHeight = fullHD.y;
 int main()
 {
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
-    SetTraceLogLevel(LOG_ALL);
+	SetTraceLogLevel(LOG_ALL);
 	InitWindow(screenWidth, screenHeight, "Cube!");
 	SetWindowPosition(25, 50);
 
@@ -83,11 +84,11 @@ int main()
 		handleKeyboard();
 
 		if (cube.state != Cube::QUIET) {
-			updateCubeMovement();
+			cube.update();
 		} 
 		else if (kb.hasQueuedKey) {
-			calculateCubeMovement(kb.queuedKey);
-			updateCubeMovement();
+			cube.calculateMovement(kb.queuedKey);
+			cube.update();
 			
 			if (!kb.shiftPressed)
 				kb.hasQueuedKey = false;
@@ -112,25 +113,13 @@ int main()
 		if (IsFileDropped()) {
 			FilePathList droppedFiles = LoadDroppedFiles();
 			if (droppedFiles.count == 1) {// Only support one file 
-				if (IsFileExtension(droppedFiles.paths[0], ".png")) {
+				
+				const char* droppedFile = droppedFiles.paths[0];
+				if (IsFileExtension(droppedFile, ".png")) {
 					
-					ground.clearGroundMap();
-					entityPool.freeEntities();
+					loadNewMap(droppedFile);
 					
-					ground.loadGroundMap(droppedFiles.paths[0]);
-					entityPool.init(500);
-					
-					PositionIndex pi = setupMap();
-					cube.pIndex = pi;
-					cube.position = { pi.x + 0.5f, 0.51f, pi.z+ 0.5f};
-					camera.c3d.position = Vector3Add(cube.position, Vector3({9.5f, 2.5f, 0.5f}));
-					camera.c3d.target = cube.position;
-
-					cube.animationProgress = 0.0f;
-					cube.nextPosition = cube.position;
-					updateCubeMovement();
-					
-				} else if (IsFileExtension(droppedFiles.paths[0], ".hdr")) {
+				} else if (IsFileExtension(droppedFile, ".hdr")) {
 					skybox.update();
 				}
 			}
@@ -165,7 +154,7 @@ int main()
 					DrawModel(ground.model, {-4.5f,0.05,-2.5f}, 1.0f, RED);
 					DrawModel(ground.model, {-4.5f,0.05,-3.5f}, 1.0f, RED);
 
-					drawRollingCube();
+					cube.draw();
 				}
 				
 				// Draw entities, spawn cube and lights
@@ -280,7 +269,7 @@ void handleMouseButtons() {
 	camera.angleY += mouse.deltaPosition.y * 0.003f;
 	camera.angleY = Clamp(camera.angleY, MIN_ANGLE_Y, MAX_ANGLE_Y);
 	
-	mouseUpdateCubeDirection();
+	cube.updateDirection();
 
 	if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !mouse.cursorHidden && ops.editEnabled) {
 		editEntity();
@@ -380,7 +369,7 @@ void handleKeyboard() {
 			cube.animationSpeed = KeyDelay::lerpSpeed(t, 0.01f, 0.5f);
 
 		if (cube.state == Cube::QUIET) { // pressed after a stop
-			calculateCubeMovement(pressedKey);
+			cube.calculateMovement(pressedKey);
 		}
 		else if (!kb.shiftPressed){
 			kb.hasQueuedKey = true;
@@ -391,7 +380,6 @@ void handleKeyboard() {
 
 
 //********** Sound
-
 // Generate sine wave
 #define SAMPLE_RATE 44100  // Standard sample rate
 #define SAMPLES 5500    // 1 second of audio
@@ -418,7 +406,6 @@ void initWave() {
 		waveSound[i] = LoadSoundFromWave(wave);
 	}
 }
-
 
 //********** Timers
 Timer moveTimer("MoveTimer");
@@ -485,11 +472,23 @@ void updateSpawnedCube() {
 	}
 }
 
-void fillGroundWithEntities() {
-
-}
-
 // ****** Entities (Obstacles, Pushbox, etc)
+void drawEntities() {
+	for (int i=0; i<entityPool.getCount(); i++) {
+		Entity e = entityPool.getEntity(i);
+		Vector3 v = getPositionFromIndexes(e.pIndex);
+					
+		Color color = 
+			e.type == OBSTACLE ? RED :
+			e.type == PUSHBOX ? BLUE : 
+			e.type == PULLBOX ? GREEN : 
+			e.type == PUSHPULLBOX ? YELLOW : 
+			MAGENTA;
+					
+		if (!e.hidden)
+			DrawModel(cube.model, v, 1.0f, color);
+	}
+}
 PositionIndex setupMap() {
 
 	LOGD("Setting map with: width=%i, height=%i", ground.width, ground.height);
@@ -528,19 +527,22 @@ PositionIndex setupMap() {
 	return cubePi;
 }
 
-void drawEntities() {
-	for (int i=0; i<entityPool.getCount(); i++) {
-		Entity e = entityPool.getEntity(i);
-		Vector3 v = getPositionFromIndexes(e.pIndex);
+void loadNewMap(const char* name) {
+
+	ground.clearGroundMap();
+	entityPool.freeEntities();
 					
-		Color color = 
-			e.type == OBSTACLE ? RED :
-			e.type == PUSHBOX ? BLUE : 
-			e.type == PULLBOX ? GREEN : 
-			e.type == PUSHPULLBOX ? YELLOW : 
-			MAGENTA;
+	ground.loadGroundMap(name);
+	entityPool.init(500);
 					
-		if (!e.hidden)
-			DrawModel(cube.model, v, 1.0f, color);
-	}
+	PositionIndex pi = setupMap();
+	cube.pIndex = pi;
+	cube.position = { pi.x + 0.5f, 0.51f, pi.z+ 0.5f};
+	camera.c3d.position = Vector3Add(cube.position, Vector3({9.5f, 2.5f, 0.5f}));
+	camera.c3d.target = cube.position;
+
+	cube.animationProgress = 0.0f;
+	cube.nextPosition = cube.position;
+	cube.update();
 }
+

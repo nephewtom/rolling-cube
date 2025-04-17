@@ -7,13 +7,13 @@
 
 
 @echo off
-del .\main.exe
+del .\cube.exe
 
 @echo on
 if "%1"=="noimgui" (
-   g++ -g -Wall -D NO_IMGUI log.cpp main.cpp -o main.exe -D_WIN32 -I ./raylib/src -L./raylib/src -lraylib -lgdi32 -lwinmm -std=c++20
+   g++ -g -Wall -D NO_IMGUI log.cpp main.cpp -o cube.exe -D_WIN32 -I ./raylib/src -L./raylib/src -lraylib -lgdi32 -lwinmm -std=c++20
 ) else (
-  g++ -g -Wall log.cpp main.cpp -o main.exe -D_WIN32 -I./rlImGui/src -I ./rlImGui/imgui -I ./rlImGui/imgui/backends -I ./raylib/src -L./rlImGui/src -L./raylib/src -lrlImGui -lraylib -lgdi32 -lwinmm -std=c++20
+  g++ -g -Wall log.cpp main.cpp -o cube.exe -D_WIN32 -I./rlImGui/src -I ./rlImGui/imgui -I ./rlImGui/imgui/backends -I ./raylib/src -L./rlImGui/src -L./raylib/src -lrlImGui -lraylib -lgdi32 -lwinmm -std=c++20
 )
 @echo off
-.\main.exe
+.\cube.exe

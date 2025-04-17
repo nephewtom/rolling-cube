@@ -54,7 +54,7 @@ Mouse mouse = {
 };
 
 // ****** Options
-struct ImguiOptions {
+struct Options {
 	bool drawAxis;
 	bool coloredGround;
 	bool inputWindow;
@@ -67,7 +67,7 @@ struct ImguiOptions {
 	bool editEnabled;
 	bool soundEnabled;
 };
-ImguiOptions ops = {
+Options ops = {
 	.drawAxis = false,
 	.coloredGround = false,
 	

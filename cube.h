@@ -40,6 +40,22 @@ struct Cube {
 	Sound pushFailWav;
 
 	void init(Vector3 v);
+	void updateDirection();
+	
+	void setMoveStep(int key);
+	State calculateMovement(int key);
+	void moveNegativeX();
+	void movePositiveX();
+	void moveNegativeZ();
+	void movePositiveZ();
+	BoxType boxInPushDirection(int xi, int zi);
+	BoxType boxBeyondPushDirection(int xi, int zi);
+	BoxType boxInPullDirection();
+
+	void update();
+	void draw ();
+	void animationEnded();
+	
 	void playSound();
 	Sound& pickSound();
 };
