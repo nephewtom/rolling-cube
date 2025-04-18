@@ -1,4 +1,5 @@
 CUBE = cube.exe
+SRC = ./src
 
 RAYLIB_DIR = ./raylib/src
 RAYLIB_EXAMPLES = ./raylib/examples
@@ -32,7 +33,8 @@ help:
 all:raylib raylib-ex rlImGui r3d r3d-ex tests cube
 
 cube:raylib rlImGui
-	build.bat
+	$(MAKE) -C $(SRC) -j4
+# build.bat
 
 $(RAYLIB):
 	@echo
