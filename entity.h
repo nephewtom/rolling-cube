@@ -14,10 +14,17 @@ struct PositionIndex {
 	PositionIndex operator*(int scalar) const {
 		return {x * scalar, z * scalar};
 	}
+	
+	bool operator==(const PositionIndex& other) const {
+		if (x == other.x && z == other.z) return true;
+		else return false;
+	}
+
 };
+typedef PositionIndex PIndex;
 
 struct EntityQuery {
-	PositionIndex pIndex;
+	PIndex pIndex;
 	int id;
 };
 
@@ -38,7 +45,7 @@ const char* getBoxType(BoxType type) {
 
 class Entity {
 public:
-	PositionIndex pIndex;
+	PIndex pIndex;
 	BoxType type;
 	bool hidden;
 };
@@ -51,7 +58,7 @@ private:
 
 public:
 	int getCount() { return _count; }
-	PositionIndex getPositionIndex(int id) { return _entity[id].pIndex; }
+	PIndex getPositionIndex(int id) { return _entity[id].pIndex; }
 	Entity& getEntity(int id) { return _entity[id]; }
 	
 	// Initialize the structure with an initial capacity
@@ -84,7 +91,7 @@ public:
 	}
 
 	// Add an obstacle to the pool
-	int add(PositionIndex pIndex, BoxType type) {
+	int add(PIndex pIndex, BoxType type) {
 		if (_count == _capacity) {
 			expand();
 		}

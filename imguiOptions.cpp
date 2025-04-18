@@ -93,13 +93,6 @@ void imguiMenus(Cube& cube, CubeCamera& camera) {
 		ImGui::Text("pIndex (ix, iz):"); ImGui::SameLine(140);
 		ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "(%i, %i)", cube.pIndex.x, cube.pIndex.z);
 		
-		const char* movingBox = 
-			cube.movingBox == NONE ? "NONE" :
-			cube.movingBox == PUSHBOX ? "PUSHBOX" :
-			cube.movingBox == PULLBOX ? "PULLBOX" :
-			cube.movingBox == PUSHPULLBOX ? "PUSHPULLBOX" :
-			cube.movingBox == OTHER ? "OTHER" : "WTF!";
-		ImGui::Text("movingBox: %s", movingBox);
 		
 		ImGui::DragFloat3("position", (float *)&cube.position, 1.0f, -1000.0f, 1000.0f);
 		ImGui::DragFloat3("next position", (float *)&cube.nextPosition, 1.0f, -1000.0f, 1000.0f);

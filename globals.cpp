@@ -18,6 +18,9 @@ ShaderLightsData sld;
 #include "ground.h"
 Ground ground;
 
+#include "skybox.cpp"
+Skybox skybox;
+
 
 #include "cube.h"
 Cube cube;
@@ -79,11 +82,15 @@ Options ops = {
 	.demoWindow = false,
 	
 	.editEnabled = false,
-	.soundEnabled = false,
+	.soundEnabled = true,
 };
 
 
 // ****** Global functions
+static inline int sign(int x) {
+    return (x > 0) - (x < 0);
+}
+
 void getIndexesFromPosition(PositionIndex& pIndex, Vector3 pos) {
 	pIndex.x = pos.x - 0.5;
 	pIndex.z = pos.z - 0.5;
@@ -127,6 +134,31 @@ void getMouseXZindexes(Camera& camera, PositionIndex& pIndex) {
 		return;
 	}
 	getIndexesFromPosition(pIndex, Vector3Add({ 0.5f, 0.0f, 0.5f}, xzPos));
+}
+
+void playSound(Sound sound) {
+	if (ops.soundEnabled) 
+		PlaySound(sound);
+}
+
+// Define axis parameters
+const float axisLength = 2.0f;  // Length of each axis
+const float coneLength = 0.3f;  // Length of the cone part
+const float coneRadius = 0.1f;  // Radius of the cone base
+const float lineRadius = 0.02f; // Radius for the axis lines    
+void drawAxis() {
+    // Draw coordinate axes with cones
+    // X axis (red)
+    DrawCylinderEx(Vector3Zero(), (Vector3){axisLength, 0, 0}, lineRadius, lineRadius, 8, RED);
+    DrawCylinderEx((Vector3){axisLength, 0, 0}, (Vector3){axisLength + coneLength, 0, 0}, coneRadius, 0.0f, 8, RED);
+
+    // Y axis (green)
+    DrawCylinderEx(Vector3Zero(), (Vector3){0, axisLength, 0}, lineRadius, lineRadius, 8, GREEN);
+    DrawCylinderEx((Vector3){0, axisLength, 0}, (Vector3){0, axisLength + coneLength, 0}, coneRadius, 0.0f, 8, GREEN);
+
+    // Z axis (blue)
+    DrawCylinderEx(Vector3Zero(), (Vector3){0, 0, axisLength}, lineRadius, lineRadius, 8, BLUE);
+    DrawCylinderEx((Vector3){0, 0, axisLength}, (Vector3){0, 0, axisLength + coneLength}, coneRadius, 0.0f, 8, BLUE);
 }
 
 #endif

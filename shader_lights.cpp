@@ -41,7 +41,7 @@ void ShaderLightsData::loadShader() {
 void ShaderLightsData::createLights() {
 	lights[0] = createLight(LIGHT_POINT, { 47.5f, 0.5f, 47.5f }, { 0.0f, 0.0f, 0.0f }, YELLOW);
 	lights[1] = createLight(LIGHT_POINT, { 50.5f, 0.5f, 50.5f }, { 0.0f, 0.0f, 0.0f }, RED);
-	lights[2] = createLight(LIGHT_POINT, { 47.5f, 0.5f, 52.5f }, { 0.0f, 0.0f, 0.0f }, BLUE);
+	lights[2] = createLight(LIGHT_POINT, { 5.5f, 0.5f, 2.5f }, { 0.0f, 0.0f, 0.0f }, BLUE);
 	lights[3] = createLight(LIGHT_POINT, { 52.5f, 0.5f, 47.5f }, { 0.0f, 0.0f, 0.0f }, GREEN);
 	lights[4] = createLight(LIGHT_DIRECTIONAL,
 							{ 45.0f, 2.0f, 55.0f }, { 50.0f, 0.0f, 50.0f }, { 139,146,146,255 });

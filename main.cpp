@@ -4,7 +4,6 @@
 
 #include "log.h"
 #include "globals.cpp"
-#include "skybox.cpp"
 #include "cube.cpp"
 
 #ifndef NO_IMGUI
@@ -20,12 +19,14 @@ void updateSpawnedCube();
 
 void initWave();
 PositionIndex setupMap();
+
 void handleMouseButtons();
 void handleMouseWheel();
 void handleKeyboard();
 void drawEntities();
-void drawAxis();
 void drawText(int margin);
+
+void handleDroppedFiles();
 void loadNewMap(const char* name);
 
 //********** Main
@@ -42,7 +43,7 @@ int main()
 
 	LOGD("*** Started Cube! ***");
 	
-	// SetTargetFPS(60);
+// SetTargetFPS(60);
 	InitAudioDevice();
 	initWave();
 
@@ -50,140 +51,125 @@ int main()
 		HideCursor();
 	}
 
-	sld.loadShader();
-	sld.loadLogo();
-	sld.createLights();
+		sld.loadShader();
+		sld.loadLogo();
+		sld.createLights();
 	
-	Skybox skybox;
-	skybox.load();
+		skybox.load();
 
-	ground.init(sld.shader, sld.logo);
-	entityPool.init(1000);
-	PositionIndex initPos = setupMap();
+		ground.init(sld.shader, sld.logo, "./assets/test-map.png");
+		entityPool.init(1000);
+		PositionIndex initPos = setupMap();
 	
-	Vector3 cubeInitPos = { initPos.x + 0.5f, 0.51f, initPos.z+ 0.5f};
-	cube.init(cubeInitPos);
-	camera.init(cubeInitPos);
+		Vector3 cubeInitPos = { initPos.x + 0.5f, 0.51f, initPos.z+ 0.5f};
+		cube.init(cubeInitPos);
+		camera.init(cubeInitPos);
 
-	int instancing = 0;
-	int instancingLoc = GetShaderLocation(sld.shader, "instancing");
-	SetShaderValue(sld.shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
+		int instancing = 0;
+		int instancingLoc = GetShaderLocation(sld.shader, "instancing");
+		SetShaderValue(sld.shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
 
-	activationLightTimer.start(3.0f);
+		activationLightTimer.start(3.0f);
 	
 #ifndef NO_IMGUI
-	rlImGuiSetup(true);
+		rlImGuiSetup(true);
 #endif
 
-	while (!WindowShouldClose()) // Main game loop
-	{
-		delta = GetFrameTime();
-
-		handleMouseButtons();
-		handleMouseWheel();
-		handleKeyboard();
-
-		if (cube.state != Cube::QUIET) {
-			cube.update();
-		} 
-		else if (kb.hasQueuedKey) {
-			cube.calculateMovement(kb.queuedKey);
-			cube.update();
-			
-			if (!kb.shiftPressed)
-				kb.hasQueuedKey = false;
-		}
-
-		camera.update();
-
-		// Update the shader with the camera view vector (points towards { 0.0f, 0.0f, 0.0f })
-		float cameraPos[3] = { camera.c3d.position.x, camera.c3d.position.y, camera.c3d.position.z };
-		SetShaderValue(sld.shader, sld.shader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
-
-
-		SetShaderValue(sld.shader, sld.ambientLoc, &sld.ambient, SHADER_UNIFORM_VEC4);
-
-		sld.updateLights();
-
-		testLightMovement();
-		if (spawnCube) {
-			updateSpawnedCube();
-		}
-		
-		if (IsFileDropped()) {
-			FilePathList droppedFiles = LoadDroppedFiles();
-			if (droppedFiles.count == 1) {// Only support one file 
-				
-				const char* droppedFile = droppedFiles.paths[0];
-				if (IsFileExtension(droppedFile, ".png")) {
-					
-					loadNewMap(droppedFile);
-					
-				} else if (IsFileExtension(droppedFile, ".hdr")) {
-					skybox.update();
-				}
-			}
-			UnloadDroppedFiles(droppedFiles);
-		}
-		
-		BeginDrawing();
+		while (!WindowShouldClose()) // Main game loop
 		{
-			ClearBackground(BLACK);
+			delta = GetFrameTime();
 
-			BeginMode3D(camera.c3d);
-			{
-				skybox.draw(cube.direction);
-				
-				// Draw Ground & axis
-				if (ops.coloredGround) {
-					ground.drawColored();
-				} else {
-					ground.drawInstances(sld.shader);
-				}
-				if (ops.drawAxis) {
-					drawAxis();
-				}
+			handleMouseButtons();
+			handleMouseWheel();
+			handleKeyboard();
 
-				{// Draw Cube & texture sample
-					instancing = 0;
-					SetShaderValue(sld.shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
-				
-					// Draw several planes with ground texture to check its appearance
-					DrawModel(ground.model, {-2.5f,0.05,-2.5f}, 1.0f, RED);
-					DrawModel(ground.model, {-3.5f,0.05,-2.5f}, 1.0f, RED);
-					DrawModel(ground.model, {-4.5f,0.05,-2.5f}, 1.0f, RED);
-					DrawModel(ground.model, {-4.5f,0.05,-3.5f}, 1.0f, RED);
-
-					cube.draw();
-				}
-				
-				// Draw entities, spawn cube and lights
-				drawEntities();
-				if (spawnCube) {
-					DrawModel(cube.model, spawnPos, 1.0f, MAGENTA);
-				}				
-				sld.drawLights();
-
+			if (cube.state != Cube::QUIET) {
+				cube.update();
+			} 
+			else if (kb.hasQueuedKey) {
+				cube.checkMovement(kb.queuedKey);
+				cube.update();
+			
+				if (!kb.shiftPressed)
+					kb.hasQueuedKey = false;
 			}
-			EndMode3D();
 
-			int tp = 10; // topMargin
-			DrawRectangle(8, 8, 200, 64, RAYWHITE);
-			DrawFPS(12, tp);
-			DrawText("F1 - Toggle Menus", 12, tp + 20, 20, BLACK);
-			DrawText("F4 - Edit Enabled", 12, tp + 40, 20, BLACK);
-			// DrawText("F5 - Toggle ground colors", 12, tp + 60, 20, BLACK);
+			camera.update();
+
+			// Update the shader with the camera view vector (points towards { 0.0f, 0.0f, 0.0f })
+			float cameraPos[3] = { camera.c3d.position.x, camera.c3d.position.y, camera.c3d.position.z };
+			SetShaderValue(sld.shader, sld.shader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
+
+
+			SetShaderValue(sld.shader, sld.ambientLoc, &sld.ambient, SHADER_UNIFORM_VEC4);
+
+			sld.updateLights();
+
+			testLightMovement();
+			if (spawnCube) {
+				updateSpawnedCube();
+			}
+		
+			handleDroppedFiles();
+		
+			BeginDrawing();
+			{
+				ClearBackground(BLACK);
+
+				BeginMode3D(camera.c3d);
+				{
+					skybox.draw(cube.direction);
+				
+					// Draw Ground & axis
+					if (ops.coloredGround) {
+						ground.drawColored();
+					} else {
+						ground.drawInstances(sld.shader);
+					}
+					if (ops.drawAxis) {
+						drawAxis();
+					}
+
+					{// Draw Cube & texture sample
+						instancing = 0;
+						SetShaderValue(sld.shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
+				
+						// Draw several planes with ground texture to check its appearance
+						DrawModel(ground.model, {-2.5f,0.05,-2.5f}, 1.0f, RED);
+						DrawModel(ground.model, {-3.5f,0.05,-2.5f}, 1.0f, RED);
+						DrawModel(ground.model, {-4.5f,0.05,-2.5f}, 1.0f, RED);
+						DrawModel(ground.model, {-4.5f,0.05,-3.5f}, 1.0f, RED);
+
+						cube.draw();
+					}
+				
+					// Draw entities, spawn cube and lights
+					drawEntities();
+					if (spawnCube) {
+						DrawModel(cube.model, spawnPos, 1.0f, MAGENTA);
+					}				
+					sld.drawLights();
+
+				}
+				EndMode3D();
+
+				int tp = 10; // topMargin
+				DrawRectangle(8, 8, 200, 64, RAYWHITE);
+				DrawFPS(12, tp);
+				DrawText("F1 - Toggle Menus", 12, tp + 20, 20, BLACK);
+				DrawText("F4 - Edit Enabled", 12, tp + 40, 20, BLACK);
+				// DrawText("F5 - Toggle ground colors", 12, tp + 60, 20, BLACK);
 
 #ifndef NO_IMGUI
-			if (!mouse.cursorHidden) {
-				imguiMenus(cube, camera);
-			}
+				if (!mouse.cursorHidden) {
+					imguiMenus(cube, camera);
+				}
 #endif
 
-			// drawText(tp+120);
+				// drawText(tp+120);
+			}
+			EndDrawing();
 		}
-		EndDrawing();
-	}
 #ifndef NO_IMGUI
 	rlImGuiShutdown();
 #endif
@@ -206,13 +192,7 @@ void drawText(int margin) {
 			 10, margin, 20, BLACK);
 }
 
-void playSound(Sound sound) {
-	if (ops.soundEnabled) 
-		PlaySound(sound);
-}
-
 void editEntity() {
-	
 	PositionIndex pIndex;
 	getMouseXZindexes(camera.c3d, pIndex);
 	LOGD("Entity at pIndex: (%i, %i)", pIndex.x, pIndex.z);
@@ -243,7 +223,7 @@ void editEntity() {
 }
 
 
-
+//********** Mouse management
 const float MAX_ANGLE_Y = 89.0f * DEG2RAD;
 const float MIN_ANGLE_Y = -1.5f * DEG2RAD;
 void handleMouseButtons() {
@@ -286,30 +266,6 @@ void handleMouseWheel() {
         camera.distance = fmax(mouse.minZoomDistance, fmin(camera.distance, mouse.maxZoomDistance));
     }
 }
-
-
-
-// Define axis parameters
-const float axisLength = 2.0f;  // Length of each axis
-const float coneLength = 0.3f;  // Length of the cone part
-const float coneRadius = 0.1f;  // Radius of the cone base
-const float lineRadius = 0.02f; // Radius for the axis lines    
-void drawAxis() {
-    // Draw coordinate axes with cones
-    // X axis (red)
-    DrawCylinderEx(Vector3Zero(), (Vector3){axisLength, 0, 0}, lineRadius, lineRadius, 8, RED);
-    DrawCylinderEx((Vector3){axisLength, 0, 0}, (Vector3){axisLength + coneLength, 0, 0}, coneRadius, 0.0f, 8, RED);
-
-    // Y axis (green)
-    DrawCylinderEx(Vector3Zero(), (Vector3){0, axisLength, 0}, lineRadius, lineRadius, 8, GREEN);
-    DrawCylinderEx((Vector3){0, axisLength, 0}, (Vector3){0, axisLength + coneLength, 0}, coneRadius, 0.0f, 8, GREEN);
-
-    // Z axis (blue)
-    DrawCylinderEx(Vector3Zero(), (Vector3){0, 0, axisLength}, lineRadius, lineRadius, 8, BLUE);
-    DrawCylinderEx((Vector3){0, 0, axisLength}, (Vector3){0, 0, axisLength + coneLength}, coneRadius, 0.0f, 8, BLUE);
-}
-
-
 
 //********** Keyboard management
 void handleKeyboard() {
@@ -369,7 +325,7 @@ void handleKeyboard() {
 			cube.animationSpeed = KeyDelay::lerpSpeed(t, 0.01f, 0.5f);
 
 		if (cube.state == Cube::QUIET) { // pressed after a stop
-			cube.calculateMovement(pressedKey);
+			cube.checkMovement(pressedKey);
 		}
 		else if (!kb.shiftPressed){
 			kb.hasQueuedKey = true;
@@ -418,10 +374,10 @@ void testLightMovement() {
 		if (!activationLightTimer.isDone()) {
 			return;
 		}
-		sld.lights[1].position.x = 45.5f;
+		sld.lights[1].position.x = 5.5f;
 		sld.lights[1].enabled = true;
 		moveTimer.start(0.5f);
-		playSound(waveSound[0]);
+		// playSound(waveSound[0]);
 	}
 
 	moveTimer.update(delta);
@@ -430,7 +386,7 @@ void testLightMovement() {
 	}
 	countTimer++;
 	if (countTimer == 5) {
-		LOGD("testLightMovement: countTimer = 5!");
+		// LOGD("testLightMovement: countTimer = 5!");
 		sld.lights[1].enabled = false;
 		countTimer = 0;
 		activationLightTimer.start(3.0f);
@@ -438,7 +394,7 @@ void testLightMovement() {
 		spawnDirUp = true;
 		return;
 	}
-	playSound(waveSound[countTimer]);
+	// playSound(waveSound[countTimer]);
 	sld.lights[1].position.x += 1.0f;
 	moveTimer.start();
 }
@@ -490,9 +446,8 @@ void drawEntities() {
 	}
 }
 PositionIndex setupMap() {
-
 	LOGD("Setting map with: width=%i, height=%i", ground.width, ground.height);
-	PositionIndex cubePi = { 0, 0 };
+	PositionIndex cubePosIndex = { 0, 0 };
 	int i=0;
 	for (int ix = 0; ix < ground.width; ix++) {
 		for (int iz = 0; iz < ground.height; iz++) {
@@ -514,7 +469,7 @@ PositionIndex setupMap() {
 			} else {
 				ground.cells[ix][iz].isEmpty = true;
 				if (ColorIsEqual(color, { 0, 0, 0, 255})) {
-					cubePi = pi;
+					cubePosIndex = pi;
 				}
 			}
 			ground.cells[ix][iz].entityId = id;
@@ -524,7 +479,7 @@ PositionIndex setupMap() {
 		}
 	}
 	
-	return cubePi;
+	return cubePosIndex;
 }
 
 void loadNewMap(const char* name) {
@@ -546,3 +501,20 @@ void loadNewMap(const char* name) {
 	cube.update();
 }
 
+void handleDroppedFiles() {
+	if (IsFileDropped()) {
+		FilePathList droppedFiles = LoadDroppedFiles();
+		if (droppedFiles.count == 1) {// Only support one file 
+				
+			const char* droppedFile = droppedFiles.paths[0];
+			if (IsFileExtension(droppedFile, ".png")) {
+					
+				loadNewMap(droppedFile);
+					
+			} else if (IsFileExtension(droppedFile, ".hdr")) {
+				skybox.update();
+			}
+		}
+		UnloadDroppedFiles(droppedFiles);
+	}
+}

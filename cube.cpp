@@ -1,4 +1,6 @@
+#include "entity.h"
 #include "globals.cpp"
+#include "raymath.h"
 
 //********** Cube & Camera
 void Cube::init(Vector3 initPos) {
@@ -16,9 +18,8 @@ void Cube::init(Vector3 initPos) {
 	transform = MatrixIdentity();
 
 	state = Cube::QUIET;
-	movingBox = NONE;
-	pushingBoxIndex = {};
-	pullingBoxIndex = {};
+	pullingBox = NONE;
+	pushBoxesCount = 0;
 		
 	animationProgress = 0.0f;
 	animationSpeed = 2.5f;
@@ -170,23 +171,30 @@ void Cube::setMoveStep(int pressedKey) {
 	}
 }
 
-Cube::State Cube::calculateMovement(int pressedKey) {
+bool Cube::isOutOfLimits(PIndex pCheck) {
+	if (pIndex.x + pCheck.x < 1 || pIndex.x + pCheck.x > ground.width - 2 ||
+		pIndex.z + pCheck.z < 1 || pIndex.z + pCheck.z > ground.height - 2) {
+		// Trying to move outside of limits
+		LOGW("Limit reached pIndex: (%i, %i)", pIndex.x, pIndex.z);
+		return true;
+	}
+	return false;
+}
+
+
+Cube::State Cube::checkMovement(int pressedKey) {
 	
 	setMoveStep(pressedKey);
+	PIndex pStep = { (int)moveStep.x, (int)moveStep.z };
 
-	int xi = (int)moveStep.x;
-	int zi = (int)moveStep.z;
-
-	if (pIndex.x + xi < 1 || pIndex.x+xi > ground.width - 2 ||
-		pIndex.z + zi < 1 || pIndex.z+zi > ground.height - 2) {
-		LOGW("Limit pIndex: (%i, %i)", pIndex.x, pIndex.z);
-		state = QUIET;
+	state = QUIET;
+	if (isOutOfLimits(pStep)) {
 		playSound();
 		return state;
 	}
 	
-	BoxType boxInPushDir = boxInPushDirection(xi, zi);
-	if (boxInPushDir != NONE) {
+	BoxType boxInPushDir = boxInPushDirection(pStep);
+	if (boxInPushDir != NONE) { // Just for debugging
 		LOGD("boxInPushDir: %s", getBoxType(boxInPushDir));
 	}
 	
@@ -200,22 +208,22 @@ Cube::State Cube::calculateMovement(int pressedKey) {
 	nextPosition.x = position.x + moveStep.x;
 	nextPosition.y = position.y + moveStep.y;
 	nextPosition.z = position.z + moveStep.z;
-	pIndex.x += xi;
-	pIndex.z += zi;
-
+	pIndex.x += pStep.x;
+	pIndex.z += pStep.z;
 	LOGD("Updated pIndex: (%i, %i)", pIndex.x, pIndex.z);
 
 	if (boxInPushDir == NONE) {
 		BoxType boxInPullDir = boxInPullDirection();
-		// LOGD("boxInPullDir: %s", getBoxType(boxInPullDir));
+		LOGD("boxInPullDir: %s", getBoxType(boxInPullDir));
 		if (boxInPullDir == PULLBOX || boxInPullDir == PUSHPULLBOX) {
 			LOGD("Pulling!");
 			state = PULLING;
 			playSound();
-			movingBox = boxInPullDir;
+			pullingBox = boxInPullDir;
 			return state;
 		}
 	
+		LOGD("Moving!");
 		rotationAngle = 0.0f;
 		animationProgress = 0.0f;
 		state = MOVING;
@@ -223,7 +231,11 @@ Cube::State Cube::calculateMovement(int pressedKey) {
 	}
 
 	if (boxInPushDir == PUSHBOX || boxInPushDir == PUSHPULLBOX) {
-		movingBox = boxInPushDir;
+
+		state = PUSHING;
+		playSound();
+		LOGD("Cooking pushing +1 boxes, count: %i", pushBoxesCount);
+		
 		// Check there is not a PULLBOX in the oppositeMoveStep move direction
 		BoxType boxInPullDir = boxInPullDirection();
 		if (boxInPullDir == NONE) {
@@ -231,25 +243,34 @@ Cube::State Cube::calculateMovement(int pressedKey) {
 			LOGD("Pushing!");
 			state = PUSHING;
 			playSound();
+			LOGD("pStep: (%i, %i)", pStep.x, pStep.z);
+			PIndex boxIndex = pIndex;
+			for (int i=0; i<pushBoxesCount; i++) {
+				int id = ground.getEntityId(boxIndex);
+				Entity& ePush = entityPool.getEntity(id);
+				ePush.hidden = true;
+				boxIndex = boxIndex + pStep;
+			}
 			return state;
+			
 		} else {
 			state = FAILPUSH;
 			playSound();
 			// the PUSHBOX can not be pushed if there is a PULLBOX close 
 			// to the player in the opposite moveStep direction, so undo all these stuff
-			int id = ground.cells[pushingBoxIndex.x][pushingBoxIndex.z].entityId;
-			Entity& ePush = entityPool.getEntity(id);
-			ePush.hidden = false;
-			id = ground.cells[pullingBoxIndex.x][pullingBoxIndex.z].entityId;
+			PositionIndex increment = { (int) -moveStep.x, (int) -moveStep.z };
+			PositionIndex boxIndex = pIndex + increment * 2;
+			int id = ground.getEntityId(boxIndex);
 			Entity& ePull = entityPool.getEntity(id);
 			ePull.hidden = false;
-			movingBox = NONE;
-            // Undo previous pIndex increment
-			pIndex.x -= xi;
-			pIndex.z -= zi;
-			LOGD("Cannot push a PUSHBOX if there is PULLBOX behind me!");
+
+			// Undo previous pIndex increment
+			pIndex.x -= pStep.x;
+			pIndex.z -= pStep.z;
+			LOGD("Cannot push PUSH boxes if there is PULLBOX behind me!");
 			nextPosition = position;
 			state = QUIET;
+			pushBoxesCount = 0;
 			return state;
 		}
 	}
@@ -258,169 +279,89 @@ Cube::State Cube::calculateMovement(int pressedKey) {
 	return QUIET;
 }
 
-BoxType Cube::boxBeyondPushDirection(int xi, int zi) {
-	int xii = 0, zii = 0;
-	if (xi != 0) xii = xi;
-	else if (zi != 0) zii = zi;
-	bool isEmpty =  ground.cells[cube.pIndex.x + xi + xii][cube.pIndex.z + zi + zii].isEmpty;
-	if (!isEmpty) { // check if pushbox has another entity in the move direction
-		LOGD("OBSTACLE");
-		return OBSTACLE;
-	}
-
-	return NONE;
-}
-
-BoxType Cube::boxInPushDirection(int xi, int zi) {
+BoxType Cube::boxInPushDirection(PIndex pStep) {
 	
-	// LOGD("cube.pIndex: (%i, %i)", cube.pIndex.x, cube.pIndex.z);
-	PositionIndex boxIndex = { pIndex.x + xi, pIndex.z+zi };
+	LOGD("step: (%i, %i)", pStep.x, pStep.z);
+	PIndex boxIndex = { pIndex.x + pStep.x, pIndex.z + pStep.z };
 	// LOGD("boxIndex: (%i, %i)", boxIndex.x, boxIndex.z);
 	
-	bool isEmpty =  ground.cells[boxIndex.x][boxIndex.z].isEmpty;
-	if (isEmpty) {
-		return NONE;
+	if (ground.isEmptyCell(boxIndex)) {
+		if (pushBoxesCount == 0) {
+			return NONE;
+		} else {
+			return PUSHBOX;
+		}
 	} 
 
-	int id = ground.cells[boxIndex.x][boxIndex.z].entityId;
+	int id = ground.getEntityId(boxIndex);
 	Entity& e = entityPool.getEntity(id);
 
 	if (e.type == OBSTACLE || e.type == PULLBOX) {
 		LOGD("OBSTACLE");
+		pushBoxesCount = 0;
 		return OBSTACLE;
 	}
-
-	if (boxBeyondPushDirection(xi, zi) == OBSTACLE) {
-		return OBSTACLE;
-	}
-	e.hidden = true;
-	pushingBoxIndex = boxIndex;
-	return e.type;
+	pushBoxesCount++;
+	if (pStep.x != 0) { pStep.x += sign(pStep.x); }
+	else { pStep.z += sign(pStep.z); }
+	
+	return boxInPushDirection(pStep);
 }
 
 BoxType Cube::boxInPullDirection() {
-	// we already incremented cube.pIndex, so need to get 2 steps back
+	// we already incremented pIndex, so need to get 2 steps back
 	PositionIndex increment = { (int) -moveStep.x, (int) -moveStep.z };
 	PositionIndex boxIndex = pIndex + increment * 2;
-	if (ground.cells[boxIndex.x][boxIndex.z].isEmpty) {
+	if (ground.isEmptyCell(boxIndex)) {
 		return NONE;
 	}
 	
-	int id = ground.cells[boxIndex.x][boxIndex.z].entityId;
+	int id = ground.getEntityId(boxIndex);
 	Entity& e = entityPool.getEntity(id);
-	
 	if (e.type == PULLBOX || e.type == PUSHPULLBOX) {
 		e.hidden = true;
-		pullingBoxIndex = boxIndex;
 		return e.type;
 	}
 	
 	return NONE; // we don't really care what is there is it is not a pullable box
 }
 
-void Cube::animationEnded() {
-		
-	cube.position = cube.nextPosition;
-	cube.animationProgress = 0.0f;
-		
-	if (cube.state == Cube::MOVING) {
-		cube.pitchChange = KeyDelay::lerpPitch(kb.pressReleaseTime, 0.03f, 0.3f);
-		SetSoundPitch(cube.rollWav, cube.pitchChange);
-		cube.playSound();
-
-		cube.rotationAngle = 0.0f;
-		
-	} else if (cube.state == Cube::PUSHING) {
-		LOGD("Cube::PUSHING ended!");
-		int id = ground.cells[cube.pIndex.x][cube.pIndex.z].entityId;
-		LOGD("id: %i", id);
-		Entity& e = entityPool.getEntity(id);
-		LOGD("cube.pIndex: (%i, %i)", cube.pIndex.x, cube.pIndex.z);
-		LOGD("e.pIndex: (%i, %i)", e.pIndex.x, e.pIndex.z);
-			
-		PositionIndex increment = { (int)cube.moveStep.x, (int)cube.moveStep.z };
-		e.pIndex = e.pIndex + increment;
-		LOGD("e.pIndex: (%i, %i)", e.pIndex.x, e.pIndex.z);
-		e.hidden = false;
-
-		// Check it is updated
-		Entity& e2 = entityPool.getEntity(id);
-		LOGD("e2.pIndex: (%i, %i)", e2.pIndex.x, e2.pIndex.z);
-			
-		// update ground
-		ground.cells[cube.pIndex.x][cube.pIndex.z].entityId = -1;
-		ground.cells[cube.pIndex.x][cube.pIndex.z].isEmpty = true;
-		ground.cells[e.pIndex.x][e.pIndex.z].entityId = id;
-		ground.cells[e.pIndex.x][e.pIndex.z].isEmpty = false;
-			
-		cube.movingBox = NONE;
-			
-	} else if (cube.state == Cube::PULLING) {
-		LOGD("Cube::PULLING ended!");
-		PositionIndex increment = { (int) cube.moveStep.x, (int) cube.moveStep.z };
-		PositionIndex pullboxIndex = cube.pIndex + increment * -2;
-        // PULLBOX is 2 steps behind of updated cube posIndex, so multiply by -2
-			
-		LOGD("pullboxIndex: (%i, %i)", pullboxIndex.x, pullboxIndex.z);
-		LOGD("cube.pIndex: (%i, %i)", cube.pIndex.x, cube.pIndex.z);
-		
-		int id = ground.cells[pullboxIndex.x][pullboxIndex.z].entityId;
-		Entity& e = entityPool.getEntity(id);
-		LOGD("e.pIndex: (%i, %i)", e.pIndex.x, e.pIndex.z);
-		e.pIndex = e.pIndex + increment;
-		LOGD("e.pIndex: (%i, %i)", e.pIndex.x, e.pIndex.z);
-		e.hidden = false;
-			
-		// update ground
-		ground.cells[pullboxIndex.x][pullboxIndex.z].entityId = -1;
-		ground.cells[pullboxIndex.x][pullboxIndex.z].isEmpty = true;
-		ground.cells[e.pIndex.x][e.pIndex.z].entityId = id;
-		ground.cells[e.pIndex.x][e.pIndex.z].isEmpty = false;
-			
-		cube.movingBox = NONE;
-	}
-		
-	cube.state = Cube::QUIET;
-}
-
 void Cube::update() {
 
-	cube.animationProgress += delta * cube.animationSpeed;
+	animationProgress += delta * animationSpeed;
 
 	// Use smooth easing for animation
-	float t = cube.animationProgress;
+	float t = animationProgress;
 	float smoothT = t * t * (3.0f - 2.0f * t); // Smoothstep formula
 
 	
-	if (cube.state == Cube::MOVING) { // rotates
+	if (state == Cube::MOVING) { // rotates
 		// rotate 90 degrees
-		cube.rotationAngle = 90.0f * smoothT;
+		rotationAngle = 90.0f * smoothT;
                     
-		Matrix translateToOrigin = MatrixTranslate(-cube.rotationOrigin.x, 
-												   -cube.rotationOrigin.y, 
-												   -cube.rotationOrigin.z);
-		Matrix rotation = MatrixRotate(cube.rotationAxis, cube.rotationAngle * DEG2RAD);
+		Matrix translateToOrigin = MatrixTranslate(-rotationOrigin.x, 
+												   -rotationOrigin.y, 
+												   -rotationOrigin.z);
+		Matrix rotation = MatrixRotate(rotationAxis, rotationAngle * DEG2RAD);
 	
-		Matrix translateBack = MatrixTranslate(cube.rotationOrigin.x, 
-											   cube.rotationOrigin.y, 
-											   cube.rotationOrigin.z);
+		Matrix translateBack = MatrixTranslate(rotationOrigin.x, 
+											   rotationOrigin.y, 
+											   rotationOrigin.z);
 		// Combine matrices: first translate to rotation origin, then rotate, then translate back
-		cube.transform = MatrixMultiply(translateToOrigin, rotation);
-		cube.transform = MatrixMultiply(cube.transform, translateBack);
+		transform = MatrixMultiply(translateToOrigin, rotation);
+		transform = MatrixMultiply(transform, translateBack);
 
-	} else if (cube.state == Cube::PUSHING || cube.state == Cube::PULLING) {
-		// slides from  cube.position to cube.nextPosition
-		cube.position.x = cube.position.x + (cube.nextPosition.x - cube.position.x) * smoothT;
-		cube.position.y = cube.position.y + (cube.nextPosition.y - cube.position.y) * smoothT;
-		cube.position.z = cube.position.z + (cube.nextPosition.z - cube.position.z) * smoothT;
+	} else if (state == Cube::PUSHING || state == Cube::PULLING) {
+		// slides from  position to nextPosition
+		position.x = position.x + (nextPosition.x - position.x) * smoothT;
+		position.y = position.y + (nextPosition.y - position.y) * smoothT;
+		position.z = position.z + (nextPosition.z - position.z) * smoothT;
 
-		cube.transform = MatrixTranslate(cube.position.x, 
-										 cube.position.y, 
-										 cube.position.z);
+		transform = MatrixTranslate(position.x, position.y, position.z);
 	}
 	
-	if (cube.animationProgress >= 1.0f) {
-		animationEnded();
+	if (animationProgress >= 1.0f) {
+		moveEnded();
 	}
 }
 
@@ -447,27 +388,92 @@ void Cube::draw() {
 		}
 
 	} else if (state == PUSHING || state == PULLING) {
+		// Draw THE CUBE
 		DrawModel(model, position, 1.0f, facesColor);
 		
-		Vector3 otherCubePos;
 		if (state == PUSHING) {
-			otherCubePos = Vector3Add(position, moveStep);
+			// Draw pushing cubes
+			PIndex boxIndex = pIndex;
+			PIndex pStep = { (int)moveStep.x, (int)moveStep.z };
+			Vector3 increment = moveStep;
+			for (int i=0; i<pushBoxesCount; i++) {
+				int id = ground.getEntityId(boxIndex);
+				Entity& e = entityPool.getEntity(id);
+				Color color = e.type == PUSHBOX ? BLUE : YELLOW;
+				Vector3 pushCubePos = Vector3Add(position, increment);				
+				DrawModel(model, pushCubePos, 1.0f, color);
+				boxIndex = boxIndex + pStep;
+				increment = Vector3Add(increment, moveStep);
+			}
 		}
 		else if (state == PULLING) {
+			Vector3 pullCubePos;
 			Vector3 oppositeMoveStep = Vector3Scale(moveStep, -1.0);
-			otherCubePos = Vector3Add(position, oppositeMoveStep);
+			pullCubePos = Vector3Add(position, oppositeMoveStep);
+			Color color = pullingBox == PULLBOX ? GREEN : YELLOW;
+			DrawModel(model, pullCubePos, 1.0f, color);
 		}
-		
-		Color color = 
-			movingBox == PUSHBOX ? BLUE :
-			movingBox == PULLBOX ? GREEN :
-			movingBox == PUSHPULLBOX ? YELLOW:
-			MAGENTA;
-
-		DrawModel(model, otherCubePos, 1.0f, color);
 	}
 }
 
+
+void Cube::moveEnded() {
+		
+	position = nextPosition;
+	animationProgress = 0.0f;
+		
+	if (state == MOVING) {
+		pitchChange = KeyDelay::lerpPitch(kb.pressReleaseTime, 0.03f, 0.3f);
+		SetSoundPitch(rollWav, pitchChange);
+		playSound();
+
+		rotationAngle = 0.0f;
+		
+	} else if (state == PUSHING) {
+		
+		LOGD("Cube::PUSHING ended!");
+		
+		PIndex increment = { (int)moveStep.x, (int)moveStep.z };
+		
+		for (int i = pushBoxesCount - 1; i >= 0; i--) {
+
+			PIndex pushboxIndex = { pIndex.x + i*increment.x, pIndex.z + i*increment.z };
+			int id = ground.getEntityId(pushboxIndex); LOGD("id: %i", id);
+			Entity& e = entityPool.getEntity(id);
+			LOGD("pushboxIndex: (%i, %i)", pushboxIndex.x, pushboxIndex.z);
+			assert(pushboxIndex == e.pIndex);
+
+			e.pIndex = e.pIndex + increment;
+			e.hidden = false;
+			LOGD("e.pIndex: (%i, %i)", e.pIndex.x, e.pIndex.z);
+			
+			ground.markEmptyCell(pushboxIndex);
+			ground.markEntityInCell(e.pIndex, id);
+		}
+		pushBoxesCount = 0;
+			
+	} else if (state == PULLING) {
+		LOGD("Cube::PULLING ended!");
+		PIndex increment = { (int) moveStep.x, (int) moveStep.z };
+		PIndex pullboxIndex = pIndex + increment * -2;
+        // PULLBOX is 2 steps behind of updated posIndex, so multiply by -2
+			
+		LOGD("pullboxIndex: (%i, %i)", pullboxIndex.x, pullboxIndex.z);
+		LOGD("pIndex: (%i, %i)", pIndex.x, pIndex.z);
+		
+		int id = ground.getEntityId(pullboxIndex);
+		Entity& e = entityPool.getEntity(id);
+		LOGD("e.pIndex: (%i, %i)", e.pIndex.x, e.pIndex.z);
+		e.pIndex = e.pIndex + increment;
+		LOGD("e.pIndex: (%i, %i)", e.pIndex.x, e.pIndex.z);
+		e.hidden = false;
+			
+		ground.markEmptyCell(pullboxIndex);
+		ground.markEntityInCell(e.pIndex, id);
+	}
+		
+	state = QUIET;
+}
 
 //********** Camera
 void CubeCamera::init(Vector3 initPos) {

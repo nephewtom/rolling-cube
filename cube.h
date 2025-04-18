@@ -7,7 +7,7 @@
 struct Cube {
 	
 	Model model;
-	PositionIndex pIndex;
+	PIndex pIndex;
 	Vector3 position;
 	Vector3 nextPosition;
 	Vector3 direction; // Only uses x,z coordinates
@@ -22,9 +22,8 @@ struct Cube {
 		QUIET, MOVING, PUSHING, PULLING, FAILPUSH
 	};
 	State state;
-	BoxType movingBox;
-	PositionIndex pushingBoxIndex;
-	PositionIndex pullingBoxIndex;
+	BoxType pullingBox;
+	int pushBoxesCount;
 	
 	float animationProgress;
 	float animationSpeed;
@@ -43,18 +42,19 @@ struct Cube {
 	void updateDirection();
 	
 	void setMoveStep(int key);
-	State calculateMovement(int key);
+	State checkMovement(int key);
+	bool isOutOfLimits(PIndex idx);
 	void moveNegativeX();
 	void movePositiveX();
 	void moveNegativeZ();
 	void movePositiveZ();
-	BoxType boxInPushDirection(int xi, int zi);
-	BoxType boxBeyondPushDirection(int xi, int zi);
+	BoxType boxInPushDirection(PIndex idx);
+	BoxType boxBeyondPushDirection(PIndex idx);
 	BoxType boxInPullDirection();
 
 	void update();
 	void draw ();
-	void animationEnded();
+	void moveEnded();
 	
 	void playSound();
 	Sound& pickSound();

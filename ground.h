@@ -6,6 +6,7 @@
 #include "rlgl.h"
 
 #include <assert.h> // gets rid of Emacs Flycheck complain in RL_CALLOC
+#include "entity.h"
 
 struct Cell {
 	bool isEmpty;
@@ -28,7 +29,7 @@ struct Ground {
 	Matrix *transforms;
 
 	
-	void init(Shader& shader, Texture& texture) {
+	void init(Shader& shader, Texture& texture, const char* filename) {
 
 		plane = GenMeshPlane(1.0f,1.0f,1,1);
 		model = LoadModelFromMesh(plane);
@@ -42,7 +43,7 @@ struct Ground {
 		material.maps[MATERIAL_MAP_DIFFUSE].texture = texture;
 		instancingLoc = GetShaderLocation(shader, "instancing");		
 
-		loadGroundMap("./assets/200x200-map.png");
+		loadGroundMap(filename);
 		LOGD("Finished!");
 	}
 
@@ -106,7 +107,22 @@ struct Ground {
 		DrawMeshInstanced(plane, material, transforms, width*height);
 		EndShaderMode();
 	}
-};
 
+	bool isEmptyCell(PIndex pIndex) {
+		return cells[pIndex.x][pIndex.z].isEmpty;
+	}
+	
+	int getEntityId(PIndex pIndex) {
+		return cells[pIndex.x][pIndex.z].entityId;
+	}
+	void markEmptyCell(PIndex pIndex) {
+		cells[pIndex.x][pIndex.z].isEmpty = true;
+		cells[pIndex.x][pIndex.z].entityId = -1;
+	}
+	void markEntityInCell(PIndex pIndex, int id) {
+		cells[pIndex.x][pIndex.z].isEmpty = false;
+		cells[pIndex.x][pIndex.z].entityId = id;
+	}
+};
 
 #endif
