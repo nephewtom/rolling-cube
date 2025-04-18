@@ -2,7 +2,7 @@
 
 CC = gcc
 CXX = g++
-CXXFLAGS = -g -Wall
+CXXFLAGS = -g -Wall -std=c99
 
 R3D_DIR = ../src
 RAY_DIR = ../../raylib/src
@@ -14,7 +14,19 @@ RAY_INC = -I$(R3D_DIR) -I$(RAY_DIR)
 IMGUI_INC = -I$(RLIMGUI_DIR) -I$(IMGUI_DIR) -I$(IMGUI_BE)
 
 PATH_LIBS = -L$(R3D_DIR) -L$(RAY_DIR) -L$(RLIMGUI_DIR)
-LIBS = -lr3d -lraylib -lgdi32 -lwinmm
+
+ifeq ($(OS), Windows_NT)
+	LIBS = -lr3d -lraylib -lgdi32 -lwinmm
+endif
+
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S), Darwin) # Apple
+	LIBS = -lr3d -lrlImGui -lraylib -framework OpenGL -framework CoreFoundation -framework CoreGraphics -framework IOKit -framework AppKit
+endif
+
+$(info OS= $(OS))
+$(info UNAME_S= $(UNAME_S))
+$(info LIBS= $(LIBS))
 
 OBJDIR = objs
 OBJS = $(OBJDIR)/basic.o $(OBJDIR)/bloom.o

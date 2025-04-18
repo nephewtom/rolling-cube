@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := all
 
 CXX = g++
-CXXFLAGS = -g -Wall -std=c++20 -D_WIN32
+CXXFLAGS = -g -std=c++20 -Wall
 
 RAY_DIR = ../raylib/src
 RLIMGUI_DIR = ../rlImGui/src
@@ -15,11 +15,13 @@ IMGUILIB = -lrlImgui
 
 ifeq ($(OS), Windows_NT)
 	LIBS = -lraylib -lgdi32 -lwinmm
+	CXXFLAGS += -D_WIN32
 endif
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S), Darwin) # Apple
 	LIBS = -lrlImGui -lraylib -framework OpenGL -framework CoreFoundation -framework CoreGraphics -framework IOKit -framework AppKit
+	CXXFLAGS += -Wextra -Wno-missing-field-initializers
 endif
 
 $(info OS= $(OS))
