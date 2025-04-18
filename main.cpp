@@ -445,36 +445,55 @@ void drawEntities() {
 			DrawModel(cube.model, v, 1.0f, color);
 	}
 }
+
+
+namespace Map {
+	Color Red = { 255, 0, 0, 255 };
+	Color Green = { 0, 255, 0, 255 };
+	Color Blue = { 0, 0, 255, 255 };
+	Color Yellow = { 255, 255, 0, 255 };
+	Color Black = { 0, 0, 0, 255 };
+	Color Transparent = { 255, 255, 255, 0 };
+};
+
 PositionIndex setupMap() {
+	
 	LOGD("Setting map with: width=%i, height=%i", ground.width, ground.height);
 	PositionIndex cubePosIndex = { 0, 0 };
+	Vector3 farAway = { 0.0, -1000000.0f, 0.0f };
 	int i=0;
 	for (int ix = 0; ix < ground.width; ix++) {
 		for (int iz = 0; iz < ground.height; iz++) {
-			ground.transforms[i] = MatrixTranslate(ix + 0.5f, 0.0f, iz + 0.5f);
 			
+			int id;
 			PositionIndex pi = { ix, iz };
 			ground.cells[ix][iz].isEmpty = false;
-			int id = -1;
+			
 			int colorIndex = ix + iz*ground.width;
 			Color color = ground.pixelMap[colorIndex];
-			if (ColorIsEqual(color, { 255, 0, 0, 255})) {
+			if (ColorIsEqual(color, Map::Red)) {
 				id = entityPool.add(pi, OBSTACLE);			
-			} else if (ColorIsEqual(color, { 0, 255, 0, 255})) {
+			} else if (ColorIsEqual(color, Map::Green)) {
 				id = entityPool.add(pi, PULLBOX);
-			} else if (ColorIsEqual(color, { 0, 0, 255, 255})) {
+			} else if (ColorIsEqual(color, Map::Blue)) {
 				id = entityPool.add(pi, PUSHBOX);
-			} else if (ColorIsEqual(color, { 255, 255, 0, 255})) {
+			} else if (ColorIsEqual(color, Map::Yellow)) {
 				id = entityPool.add(pi, PUSHPULLBOX);
 			} else {
+				id = -1;
 				ground.cells[ix][iz].isEmpty = true;
-				if (ColorIsEqual(color, { 0, 0, 0, 255})) {
+				if (ColorIsEqual(color, Map::Black)) { // player cube
 					cubePosIndex = pi;
 				}
 			}
 			ground.cells[ix][iz].entityId = id;
-		   
 			ground.cells[ix][iz].color = ground.getRandomColor();
+
+			Vector3 move = { ix + 0.5f, 0.0f, iz + 0.5f };
+			if (ColorIsEqual(color, Map::Transparent)) {
+				move = Vector3Add(move, farAway);
+			}
+			ground.transforms[i] = MatrixTranslate(move.x, move.y, move.z);
 			i++;
 		}
 	}
