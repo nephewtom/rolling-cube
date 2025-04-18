@@ -2,8 +2,8 @@
 
 CC = gcc
 CXX = g++
-CCFLAGS = -Wall -std=c99
-CXXFLAGS = -Wall -std=c++20
+CCFLAGS = -g -Wall -std=c99
+CXXFLAGS = -g -Wall -std=c++20
 
 RAY_DIR = ../raylib/src
 RLIMGUI_DIR = ../rlImGui/src
@@ -15,20 +15,17 @@ IMGUI_INC = -I$(RLIMGUI_DIR) -I$(IMGUI_DIR) -I$(IMGUI_BE)
 PATH_LIBS = -L$(RAY_DIR) -L$(RLIMGUI_DIR)
 IMGUILIB = -lrlImgui
 
-
-UNAME_S := $(shell uname -s)
-
-$(info OS= $(OS))
-$(info UNAME_S= $(UNAME_S))
-
 ifeq ($(OS), Windows_NT)
 	LIBS = -lraylib -lgdi32 -lwinmm
 endif
 
+UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S), Darwin) # Apple
 	LIBS = -lrlImGui -lraylib -framework OpenGL -framework CoreFoundation -framework CoreGraphics -framework IOKit -framework AppKit
 endif
 
+$(info OS= $(OS))
+$(info UNAME_S= $(UNAME_S))
 $(info LIBS= $(LIBS))
 
 OBJDIR = objs
@@ -68,6 +65,9 @@ partikel_demo: $(OBJDIR)/partikel_demo.o
 	$(CXX) -o $@ $< $(PATH_LIBS) $(LIBS)
 
 particle: $(OBJDIR)/particle.o
+	$(CXX) -o $@ $< $(PATH_LIBS) $(LIBS)
+
+laser: $(OBJDIR)/laser.o
 	$(CXX) -o $@ $< $(PATH_LIBS) $(LIBS)
 
 all: pbr shader shadertoy skybox pbr shadowmap collisions partikel_demo

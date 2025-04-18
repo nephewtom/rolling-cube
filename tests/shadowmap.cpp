@@ -22,8 +22,11 @@ void DrawScene(Model cube, Model robot);
 void Draw3DSpaceGrid(Vector3 origin, int gridSize, float spacing);
 void drawAxis();
 void drawLight();
+void drawLaser(float& time);
+
 void loadMusic();
-void loadShader();
+void loadShadowShader();
+void loadLaserShader();
 void handleKeys(float delta);
 void handleLightKeys(float delta);
 void handleMouse(float delta);
@@ -51,6 +54,9 @@ struct Global {
 	
 	int shadowMapLoc;
 	int lightVPLoc;
+	
+	Shader laserShader;
+    int timeLoc;
 	
 	bool freeCamera = false;
 	Camera camera;
@@ -93,7 +99,7 @@ int main(void)
 		.projection = CAMERA_PERSPECTIVE,
 	};
 
-	loadShader();
+	loadShadowShader();
 	Model cube = LoadModelFromMesh(GenMeshCube(1.0f, 1.0f, 1.0f));
 	cube.materials[0].shader = g.shadowShader;
 	
@@ -116,13 +122,16 @@ int main(void)
 		.projection = CAMERA_ORTHOGRAPHIC,
 	};
 
+
+	loadLaserShader();
+	
 	SetTargetFPS(60);
 	int fc = 0;
-
-	
 	rlImGuiSetup(true);
 	
 	while (!WindowShouldClose()) {
+
+		float time = GetTime();
 
 		float dt = GetFrameTime();
 		handleKeys(dt);
@@ -194,6 +203,8 @@ int main(void)
 			DrawScene(cube, robot);
 			
 			drawLight();
+			
+			drawLaser(time);
 		}
 		EndMode3D();
 
@@ -278,9 +289,9 @@ void UnloadShadowmapRenderTexture(RenderTexture2D target)
 
 void DrawScene(Model cube, Model robot)
 {
-    DrawModelEx(cube, Vector3Zero(), (Vector3) { 0.0f, 1.0f, 0.0f }, 0.0f, (Vector3) { 100.0f, 1.0f, 100.0f }, BLUE);
-    DrawModelEx(cube, (Vector3) { 1.5f, 1.0f, -1.5f }, (Vector3) { 0.0f, 1.0f, 0.0f }, 0.0f, Vector3One(), WHITE);
-    DrawModelEx(robot, (Vector3) { 0.0f, 0.5f, 0.0f }, (Vector3) { 0.0f, 1.0f, 0.0f }, 0.0f, (Vector3) { 1.0f, 1.0f, 1.0f }, RED);
+    // DrawModelEx(cube, Vector3Zero(), { 0.0f, 1.0f, 0.0f }, 0.0f, { 100.0f, 1.0f, 100.0f }, BLUE);
+	// DrawModelEx(cube, { 1.5f, 1.0f, -1.5f }, { 0.0f, 1.0f, 0.0f }, 0.0f, Vector3One(), WHITE);
+    DrawModelEx(robot, { 0.0f, 0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f }, 0.0f,  { 1.0f, 1.0f, 1.0f }, RED);
 }
 
 void Draw3DSpaceGrid(Vector3 origin, int gridSize, float spacing)
@@ -355,6 +366,34 @@ void drawLight() {
 	DrawLine3D(g.lightCam.position, lTarget, RED);
 }
 
+void drawLaser(float& time) {
+	BeginShaderMode(g.laserShader);
+	SetShaderValue(g.laserShader, g.timeLoc, &time, SHADER_UNIFORM_FLOAT);
+
+	// Simulate a "laser line" with two triangles (quad)
+	Vector2 p1 = {200, 300};
+	Vector2 p2 = {600, 300};
+	float thickness = 10.0f;
+	Vector2 dir = Vector2Normalize(Vector2Subtract(p2, p1));
+	Vector2 perp = { -dir.y, dir.x };
+	perp = Vector2Scale(perp, thickness / 2);
+
+	Vector2 v1 = Vector2Add(p1, perp);
+	Vector2 v2 = Vector2Subtract(p1, perp);
+	Vector2 v3 = Vector2Add(p2, perp);
+	Vector2 v4 = Vector2Subtract(p2, perp);
+
+	rlBegin(RL_QUADS);
+	rlTexCoord2f(0.0f, 0.0f); rlVertex2f(v1.x, v1.y);
+	rlTexCoord2f(0.0f, 1.0f); rlVertex2f(v2.x, v2.y);
+	rlTexCoord2f(1.0f, 1.0f); rlVertex2f(v4.x, v4.y);
+	rlTexCoord2f(1.0f, 0.0f); rlVertex2f(v3.x, v3.y);
+	rlEnd();
+
+	EndShaderMode();
+}
+
+
 void loadMusic() {
 	FILE *file = fopen("satie.wav", "rb");
     if (!file) {
@@ -373,11 +412,10 @@ void loadMusic() {
     g.music = LoadMusicStreamFromMemory(".wav", data, size);
 }
 
-void loadShader() {
-	g.shadowShader = LoadShader(TextFormat("shaders/shadowmap.vs", GLSL_VERSION),
-								TextFormat("shaders/shadowmap.fs", GLSL_VERSION));
-	
+void loadShadowShader() {
+	g.shadowShader = LoadShader("shaders/shadowmap.vs", "shaders/shadowmap.fs");
 	g.shadowShader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(g.shadowShader, "viewPos");
+
 	g.lightDir = Vector3Normalize((Vector3){ 0.35f, -1.0f, -0.35f });
 	Color lightCol = WHITE;
 	g.lightColor = ColorNormalize(lightCol);
@@ -385,6 +423,7 @@ void loadShader() {
 	g.lightColorLoc = GetShaderLocation(g.shadowShader, "lightColor");
 	SetShaderValue(g.shadowShader, g.lightDirLoc, &g.lightDir, SHADER_UNIFORM_VEC3);
 	SetShaderValue(g.shadowShader, g.lightColorLoc, &g.lightColor, SHADER_UNIFORM_VEC4);
+
 	g.ambientLoc = GetShaderLocation(g.shadowShader, "ambient");
 	SET_FLOAT4(g.ambient, 0.1f, 0.1f, 0.1f, 1.0f);
 	SetShaderValue(g.shadowShader, g.ambientLoc, g.ambient, SHADER_UNIFORM_VEC4);
@@ -394,6 +433,12 @@ void loadShader() {
 	int shadowMapResolution = SHADOWMAP_RESOLUTION;
 	SetShaderValue(g.shadowShader, GetShaderLocation(g.shadowShader, "shadowMapResolution"),
 				   &shadowMapResolution, SHADER_UNIFORM_INT);
+}
+
+
+void loadLaserShader() {
+	g.laserShader = LoadShader(0, "shaders/laser.fs");
+	g.timeLoc = GetShaderLocation(g.laserShader, "time");
 }
 
 void handleKeys(float dt) {
