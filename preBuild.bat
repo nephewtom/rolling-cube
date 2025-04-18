@@ -16,4 +16,14 @@ make -j4
 @echo off
 popd
 copy rlImGui\src\librlImGui.a .
-     
+
+echo.
+set /p=\n***** Building r3d *****<nul
+pushd r3d
+@echo on
+make -j4
+pushd examples
+make -j4
+@echo off
+popd
+popd
