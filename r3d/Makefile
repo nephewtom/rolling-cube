@@ -47,7 +47,7 @@ all: $(OBJDIR) $(R3D_LIB)
 
 $(R3D_LIB): $(OBJS)
 	$(AR) qc $@ $^
-	ranlib.exe $(R3D_LIB)
+	ranlib $(R3D_LIB)
 
 clean:
 	rm -f $(R3D_LIB) $(OBJDIR)/*.o

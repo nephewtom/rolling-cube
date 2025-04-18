@@ -2,7 +2,8 @@
 
 CC = gcc
 CXX = g++
-CXXFLAGS = -Wall
+CCFLAGS = -Wall -std=c99
+CXXFLAGS = -Wall -std=c++20
 
 RAY_DIR = ../raylib/src
 RLIMGUI_DIR = ../rlImGui/src
@@ -13,7 +14,22 @@ IMGUI_INC = -I$(RLIMGUI_DIR) -I$(IMGUI_DIR) -I$(IMGUI_BE)
 
 PATH_LIBS = -L$(RAY_DIR) -L$(RLIMGUI_DIR)
 IMGUILIB = -lrlImgui
-LIBS = -lraylib -lgdi32 -lwinmm
+
+
+UNAME_S := $(shell uname -s)
+
+$(info OS= $(OS))
+$(info UNAME_S= $(UNAME_S))
+
+ifeq ($(OS), Windows_NT)
+	LIBS = -lraylib -lgdi32 -lwinmm
+endif
+
+ifeq ($(UNAME_S), Darwin) # Apple
+	LIBS = -lrlImGui -lraylib -framework OpenGL -framework CoreFoundation -framework CoreGraphics -framework IOKit -framework AppKit
+endif
+
+$(info LIBS= $(LIBS))
 
 OBJDIR = objs
 OBJS = $(OBJDIR)/pbr.o $(OBJDIR)/shader.o $(OBJDIR)/shadertoy.o $(OBJDIR)/shadowmap.o $(OBJDIR)/skybox.o
@@ -22,7 +38,7 @@ $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
 $(OBJDIR)/%.o: %.c | $(OBJDIR)
-	$(CC) $(CXXFLAGS) $(RAY_INC) $(IMGUI_INC) -c -o $@ $<
+	$(CC) $(CCFLAGS) $(RAY_INC) $(IMGUI_INC) -c -o $@ $<
 
 $(OBJDIR)/%.o: %.cpp | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) $(RAY_INC) $(IMGUI_INC) -c -o $@ $<
@@ -46,7 +62,7 @@ skybox: $(OBJDIR)/skybox.o
 	$(CXX) -o $@ $< $(PATH_LIBS) $(LIBS)
 
 collisions: $(OBJDIR)/collisions.o
-	$(CXX) -o $@ $< $(PATH_LIBS) $(LIBS)
+	$(CC) -o $@ $< $(PATH_LIBS) $(LIBS)
 
 partikel_demo: $(OBJDIR)/partikel_demo.o
 	$(CXX) -o $@ $< $(PATH_LIBS) $(LIBS)
