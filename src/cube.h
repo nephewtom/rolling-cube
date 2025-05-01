@@ -14,9 +14,10 @@ struct Cube {
 	Vector3 moveStep;
 	
 	Vector3 rotationAxis;
-	Vector3 rotationOrigin;
+	Vector3 rotationPivot;
 	float rotationAngle;
 	Matrix transform;
+	Matrix accumRotations;
     
 	enum State {
 		QUIET, MOVING, PUSHING, PULLING, FAILPUSH
@@ -55,9 +56,10 @@ struct Cube {
 	void update();
 	void draw ();
 	void moveEnded();
-	
+
 	void playSound();
 	Sound& pickSound();
+	bool firstTimeCollisionWithShift;
 };
 
 struct CubeCamera {

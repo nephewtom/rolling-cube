@@ -43,13 +43,8 @@ Keyboard kb = {
 	.instancingEnabled = true,
 };
 
-Mouse mouse = {
-	.position = {0.0f, 0.0f},
-	.prevPosition = {0.0f, 0.0f},
-	.deltaPosition = {0.0f, 0.0f},
-	
+Mouse mouse = {	
 	.cursorHidden = false,
-	
 	.zoomEnabled = true,
 	.zoomSpeed = 1.0f,
 	.minZoomDistance = 5.0f,
@@ -71,7 +66,7 @@ struct Options {
 	bool soundEnabled;
 };
 Options ops = {
-	.drawAxis = false,
+	.drawAxis = true,
 	.coloredGround = false,
 	
 	.inputWindow = false,

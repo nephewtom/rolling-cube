@@ -24,9 +24,9 @@ ifeq ($(UNAME_S), Darwin) # Apple
 	CXXFLAGS += -Wextra -Wno-missing-field-initializers
 endif
 
-$(info OS= $(OS))
-$(info UNAME_S= $(UNAME_S))
-$(info LIBS= $(LIBS))
+# $(info OS= $(OS))
+# $(info UNAME_S= $(UNAME_S))
+# $(info LIBS= $(LIBS))
 
 OBJDIR = objs
 OBJS = $(OBJDIR)/main.o $(OBJDIR)/log.o
@@ -36,17 +36,17 @@ OUTDIR = ..
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
-$(OBJDIR)/%.o: %.c | $(OBJDIR)
+$(OBJDIR)/%.o: %.c $(OBJDIR)
 	$(CXX) $(CXXFLAGS) $(RAY_INC) $(IMGUI_INC) -c -o $@ $<
 
-$(OBJDIR)/%.o: %.cpp | $(OBJDIR)
+$(OBJDIR)/%.o: %.cpp $(OBJDIR)
 	$(CXX) $(CXXFLAGS) $(RAY_INC) $(IMGUI_INC) -c -o $@ $<
 
-$(OUTDIR)/cube: $(OBJS)
-	$(CXX) -o $@ $^ $(PATH_LIBS) $(LIBS) $(IMGUILIB)
+cube: $(OBJS)
+	$(CXX) -o $(OUTDIR)/$@ $^ $(PATH_LIBS) $(LIBS) $(IMGUILIB)
 
 
-all:$(OUTDIR)/cube
+all: clean $(OBJS) cube
 	cd $(OUTDIR) && ./cube
 
 clean:

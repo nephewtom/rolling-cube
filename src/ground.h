@@ -15,8 +15,10 @@ struct Cell {
 };
 struct Ground {
 	
-	Mesh plane;
 	Model model;
+	Texture logoGround;
+	
+	Mesh plane;
 	Material material;
 	int instancingLoc;
 	
@@ -35,9 +37,9 @@ struct Ground {
 		model = LoadModelFromMesh(plane);
 		model.materials[0].shader = shader;
 
-		Texture logoGround = LoadTexture("assets/logo-ground.png");
+		logoGround = LoadTexture("assets/logo-ground.png");
 		model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = logoGround;
-
+		
 		material = LoadMaterialDefault();
 		material.shader = shader;
 		material.maps[MATERIAL_MAP_DIFFUSE].texture = texture;

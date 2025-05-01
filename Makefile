@@ -32,21 +32,22 @@ help:
 
 all:raylib raylib-ex rlImGui r3d r3d-ex tests cube
 
-cube:raylib rlImGui
-	$(MAKE) -C $(SRC) -j4
+cube: raylib rlImGui
+	@echo "***** Building cube"
+	$(MAKE) -C $(SRC) all
 # build.bat
 
 $(RAYLIB):
 	@echo
 	@echo "***** Building raylib"
-	$(MAKE) -C $(RAYLIB_DIR) -j4
+	$(MAKE) -C $(RAYLIB_DIR) DEBUG=1 -j4
 
-$(RLIMGUI):
+$(RLIMGUI): $(RAYLIB)
 	@echo
 	@echo "***** Building rlImGui"
 	$(MAKE) -C $(RLIMGUI_DIR) -j4
 
-$(R3D):
+$(R3D): $(RAYLIB)
 	@echo
 	@echo "***** Building r3d"
 	$(MAKE) -C $(R3D_DIR) -j4
@@ -64,8 +65,8 @@ r3d:$(R3D)
 
 r3d-ex:$(R3D)
 	@echo
-	@echo "***** Building raylib examples"
-	$(MAKE) -C $(RAYLIB_EXAMPLES) -j4
+	@echo "***** Building r3d examples"
+	$(MAKE) -C $(R3D_EXAMPLES) -j4
 
 .PHONY: tests
 
@@ -100,4 +101,9 @@ clean-t:
 	@echo "***** Cleaning tests"
 	$(MAKE) -C $(TESTS) -j4 clean
 
-clean: clean-r clean-i clean-r3 clean-t
+clean-c:
+	@echo
+	@echo "***** Cleaning cube"
+	$(MAKE) -C $(SRC) -j4 clean
+
+clean: clean-r clean-i clean-r3 clean-t clean-c

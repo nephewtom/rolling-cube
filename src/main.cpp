@@ -1,3 +1,4 @@
+#include "entity.h"
 #include "raylib.h"
 #include "raymath.h"
 #include "rlgl.h"
@@ -34,6 +35,10 @@ Vector2 fullHD = { 1920, 1080 };
 int screenWidth = fullHD.x;
 int screenHeight = fullHD.y;
 
+
+Model semiSphere;
+
+
 int main()
 {
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
@@ -50,126 +55,176 @@ int main()
 	if (mouse.cursorHidden) {
 		HideCursor();
 	}
-
-		sld.loadShader();
-		sld.loadLogo();
-		sld.createLights();
 	
-		skybox.load();
-
-		ground.init(sld.shader, sld.logo, "./assets/test-map.png");
-		entityPool.init(1000);
-		PositionIndex initPos = setupMap();
+	sld.loadShader();
+	sld.loadLogo();
+	sld.createLights();
 	
-		Vector3 cubeInitPos = { initPos.x + 0.5f, 0.51f, initPos.z+ 0.5f};
-		cube.init(cubeInitPos);
-		camera.init(cubeInitPos);
+	skybox.load();
 
-		int instancing = 0;
-		int instancingLoc = GetShaderLocation(sld.shader, "instancing");
-		SetShaderValue(sld.shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
+	ground.init(sld.shader, sld.logo, "./assets/test-map.png");
+	entityPool.init(1000);
+	PositionIndex initPos = setupMap();
+	
+	Vector3 cubeInitPos = { initPos.x + 0.5f, 0.51f, initPos.z+ 0.5f};
+	cube.init(cubeInitPos);
+	camera.init(cubeInitPos);	
 
-		activationLightTimer.start(3.0f);
+	int instancing = 0;
+	int instancingLoc = GetShaderLocation(sld.shader, "instancing");
+	SetShaderValue(sld.shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
+
+	activationLightTimer.start(3.0f);
 	
 #ifndef NO_IMGUI
-		rlImGuiSetup(true);
+	rlImGuiSetup(true);
 #endif
 
-		while (!WindowShouldClose()) // Main game loop
+	{
+		Mesh sphere = GenMeshHemiSphere(0.5, 32, 32);
+		semiSphere = LoadModelFromMesh(sphere);
+		semiSphere.materials[0].shader = sld.shader;
+		semiSphere.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = ground.logoGround;
+		
+		Mesh plane = GenMeshPlane(100.0f, 100.0f, 10, 10); // 10x10 plane, 1x1 subdivision
+		Vector2 *uvs = (Vector2 *)plane.texcoords;
+		for (int i = 0; i < plane.vertexCount; i++)
 		{
-			delta = GetFrameTime();
+			uvs[i].x *= 4.0f; // Tile 4 times in X
+			uvs[i].y *= 4.0f; // Tile 4 times in Y
+		}
+		Model model = LoadModelFromMesh(plane);
+		model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = ground.logoGround;
+		
+	}
+		
+	LOGD("Load rock");
+	Model rock = LoadModel("assets/rock.obj");
+	rock.materials[0].shader = sld.shader;
 
-			handleMouseButtons();
-			handleMouseWheel();
-			handleKeyboard();
+	LOGD("Load tom-rock");
+	Model tom_rock = LoadModel("assets/tom-rockObj.obj");
+	tom_rock.materials[0].shader = sld.shader;
+	tom_rock.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = LoadTexture("assets/Rock020_2K-PNG_Color.png");
 
-			if (cube.state != Cube::QUIET) {
-				cube.update();
-			} 
-			else if (kb.hasQueuedKey) {
-				cube.checkMovement(kb.queuedKey);
-				cube.update();
+	LOGD("Load tom-rock");
+	Model tom_rock2 = LoadModel("assets/tom-rock.obj");
+	tom_rock2.materials[0].shader = sld.shader;
+	tom_rock2.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = LoadTexture("assets/Rock020_2K-PNG_Color.png");
+	tom_rock2.materials[0].maps[MATERIAL_MAP_NORMAL].texture = LoadTexture("assets/Rock020_2K-PNG_NormalGL.png");
+	
+
+	LOGD("Load cubeGtlfModel");	
+	Model cubeGtlfModel = LoadModel("tests/assets/tom-cube.gltf");
+	cubeGtlfModel.materials[0].shader = sld.shader;
+
+	LOGD("Load cubeObjModel");	
+	Model cubeObjModel = LoadModel("assets/tom-cube.obj");
+	cubeObjModel.materials[0].shader = sld.shader;
+		
+	
+	while (!WindowShouldClose()) // Main game loop
+	{
+		delta = GetFrameTime();
+
+		handleMouseButtons();
+		handleMouseWheel();
+		handleKeyboard();
+
+		if (cube.state != Cube::QUIET) {
+			cube.update();
+		}
+		else if (kb.hasQueuedKey) {
+			cube.checkMovement(kb.queuedKey);
+			cube.update();
 			
-				if (!kb.shiftPressed)
-					kb.hasQueuedKey = false;
-			}
+			if (!kb.shiftPressed)
+				kb.hasQueuedKey = false;
+		}
 
-			camera.update();
+		camera.update();
 
-			// Update the shader with the camera view vector (points towards { 0.0f, 0.0f, 0.0f })
-			float cameraPos[3] = { camera.c3d.position.x, camera.c3d.position.y, camera.c3d.position.z };
-			SetShaderValue(sld.shader, sld.shader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
+		// Update the shader with the camera view vector (points towards { 0.0f, 0.0f, 0.0f })
+		float cameraPos[3] = { camera.c3d.position.x, camera.c3d.position.y, camera.c3d.position.z };
+		SetShaderValue(sld.shader, sld.shader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
 
 
-			SetShaderValue(sld.shader, sld.ambientLoc, &sld.ambient, SHADER_UNIFORM_VEC4);
+		SetShaderValue(sld.shader, sld.ambientLoc, &sld.ambient, SHADER_UNIFORM_VEC4);
 
-			sld.updateLights();
+		sld.updateLights();
 
-			testLightMovement();
-			if (spawnCube) {
-				updateSpawnedCube();
-			}
+		testLightMovement();
+		if (spawnCube) {
+			updateSpawnedCube();
+		}
 		
-			handleDroppedFiles();
+		handleDroppedFiles();
 		
-			BeginDrawing();
+		BeginDrawing();
+		{
+			ClearBackground(BLACK);
+
+			BeginMode3D(camera.c3d);
 			{
-				ClearBackground(BLACK);
-
-				BeginMode3D(camera.c3d);
-				{
-					skybox.draw(cube.direction);
+				skybox.draw(cube.direction);
 				
-					// Draw Ground & axis
-					if (ops.coloredGround) {
-						ground.drawColored();
-					} else {
-						ground.drawInstances(sld.shader);
-					}
-					if (ops.drawAxis) {
-						drawAxis();
-					}
-
-					{// Draw Cube & texture sample
-						instancing = 0;
-						SetShaderValue(sld.shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
-				
-						// Draw several planes with ground texture to check its appearance
-						DrawModel(ground.model, {-2.5f,0.05,-2.5f}, 1.0f, RED);
-						DrawModel(ground.model, {-3.5f,0.05,-2.5f}, 1.0f, RED);
-						DrawModel(ground.model, {-4.5f,0.05,-2.5f}, 1.0f, RED);
-						DrawModel(ground.model, {-4.5f,0.05,-3.5f}, 1.0f, RED);
-
-						cube.draw();
-					}
-				
-					// Draw entities, spawn cube and lights
-					drawEntities();
-					if (spawnCube) {
-						DrawModel(cube.model, spawnPos, 1.0f, MAGENTA);
-					}				
-					sld.drawLights();
-
+				// Draw Ground & axis
+				if (ops.coloredGround) {
+					ground.drawColored();
+				} else {
+					// ground.drawInstances(sld.shader);
+					// DrawPlane({ 0, -0.2, 0.0f}, { 1000.0f, 1000.f}, BROWN);
+					// DrawModel(model, (Vector3){ 0, -0.2, 0 }, 1.0f, WHITE);
+					DrawGrid(200, 1);
+					DrawModel(rock, { 9.5f, 0.2f, 17.5f }, 0.30f, WHITE);
+					DrawModel(tom_rock, { 9.5f, 0.2f, 19.5f }, 1.0f, WHITE);
+					DrawModel(tom_rock2, { 9.5f, 0.2f, 21.5f }, 1.0f, WHITE);
 				}
-				EndMode3D();
+				if (ops.drawAxis) {
+					drawAxis();
+				}
 
-				int tp = 10; // topMargin
-				DrawRectangle(8, 8, 200, 64, RAYWHITE);
-				DrawFPS(12, tp);
-				DrawText("F1 - Toggle Menus", 12, tp + 20, 20, BLACK);
-				DrawText("F4 - Edit Enabled", 12, tp + 40, 20, BLACK);
-				// DrawText("F5 - Toggle ground colors", 12, tp + 60, 20, BLACK);
+				{// Draw Cube & texture sample
+					instancing = 0;
+					SetShaderValue(sld.shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
+
+						
+					// Draw several planes with ground texture to check its appearance
+					DrawModel(ground.model, {-2.5f,0.05,-2.5f}, 1.0f, RED);
+					DrawModel(ground.model, {-3.5f,0.05,-2.5f}, 1.0f, RED);
+					DrawModel(ground.model, {-4.5f,0.05,-2.5f}, 1.0f, RED);
+					DrawModel(ground.model, {-4.5f,0.05,-3.5f}, 1.0f, RED);
+
+					cube.draw();
+				}
+				
+				// Draw entities, spawn cube and lights
+				drawEntities();
+				if (spawnCube) {
+					DrawModel(cube.model, spawnPos, 1.0f, MAGENTA);
+				}				
+				sld.drawLights();
+
+			}
+			EndMode3D();
+
+			int tp = 10; // topMargin
+			DrawRectangle(8, 8, 200, 64, RAYWHITE);
+			DrawFPS(12, tp);
+			DrawText("F1 - Toggle Menus", 12, tp + 20, 20, BLACK);
+			DrawText("F4 - Edit Enabled", 12, tp + 40, 20, BLACK);
+			// DrawText("F5 - Toggle ground colors", 12, tp + 60, 20, BLACK);
 
 #ifndef NO_IMGUI
-				if (!mouse.cursorHidden) {
-					imguiMenus(cube, camera);
-				}
+			if (!mouse.cursorHidden) {
+				imguiMenus(cube, camera);
+			}
 #endif
 
-				// drawText(tp+120);
-			}
-			EndDrawing();
+// drawText(tp+120);
 		}
+		EndDrawing();
+	}
 #ifndef NO_IMGUI
 	rlImGuiShutdown();
 #endif
@@ -229,7 +284,7 @@ const float MIN_ANGLE_Y = -1.5f * DEG2RAD;
 void handleMouseButtons() {
 	
 	mouse.position = GetMousePosition();
-
+	
 	if (mouse.cursorHidden) {
 		// In gameplay, update mouse position to the center, to avoid reaching screen limits
 		Vector2 center = { GetScreenWidth() / 2.0f, GetScreenHeight() / 2.0f };
@@ -242,7 +297,7 @@ void handleMouseButtons() {
 			mouse.deltaPosition.x = mouse.position.x - mouse.prevPosition.x;
 			mouse.deltaPosition.y = mouse.position.y - mouse.prevPosition.y;
 		}
-	} 
+	}
 	mouse.prevPosition = mouse.position;
 	
 	camera.angleX -= mouse.deltaPosition.x * 0.003f;
@@ -250,7 +305,7 @@ void handleMouseButtons() {
 	camera.angleY = Clamp(camera.angleY, MIN_ANGLE_Y, MAX_ANGLE_Y);
 	
 	cube.updateDirection();
-
+	
 	if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !mouse.cursorHidden && ops.editEnabled) {
 		editEntity();
 	}
@@ -441,8 +496,12 @@ void drawEntities() {
 			e.type == PUSHPULLBOX ? YELLOW : 
 			MAGENTA;
 					
-		if (!e.hidden)
-			DrawModel(cube.model, v, 1.0f, color);
+		if (!e.hidden) {
+			if (e.type  == OBSTACLE)
+				DrawModel(cube.model, v, 1.0f, color);
+			else
+				DrawModel(semiSphere, Vector3Add(v, {0, -0.5, 0}), 1.0f, color);
+		}
 	}
 }
 

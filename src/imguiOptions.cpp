@@ -1,3 +1,4 @@
+#include "raylib.h"
 #ifndef NO_IMGUI
 
 #include "imgui.h"
@@ -98,6 +99,7 @@ void imguiMenus(Cube& cube, CubeCamera& camera) {
 		ImGui::DragFloat3("next position", (float *)&cube.nextPosition, 1.0f, -1000.0f, 1000.0f);
 		ImGui::DragFloat3("direction", (float *)&cube.direction, 1.0f, -1000.0f, 1000.0f);
 		ImGui::DragFloat3("rotationAxis", (float *)&cube.rotationAxis, 1.0f, -1000.0f, 1000.0f);
+		ImGui::DragFloat3("rotationPivot", (float *)&cube.rotationPivot, 1.0f, -1000.0f, 1000.0f);
 		ImGui::DragFloat("rotationAngle", (float *)&cube.rotationAngle, 1.0f, 200.0f, 2000.0f);
 		ImVec4 cubeFacesColor = RaylibColorToImVec4(cube.facesColor);
 		if (ImGui::ColorEdit4("faces color", &cubeFacesColor.x)) {
@@ -108,6 +110,25 @@ void imguiMenus(Cube& cube, CubeCamera& camera) {
 			cube.wiresColor = ImVec4ToRaylibColor(cubeWiresColor);
 		}
 		ImGui::Spacing();
+		ImGui::Text("transform Matrix");
+		Matrix& t = cube.transform;
+		Vector4 v[4] = { 
+			{t.m0, t.m4, t.m8 , t.m12}, 
+			{t.m1, t.m5, t.m9 , t.m13}, 
+			{t.m2, t.m6, t.m10, t.m14}, 
+			{t.m3, t.m7, t.m11, t.m15}, 
+			
+			// {t.m0*RAD2DEG, t.m4*RAD2DEG, t.m8*RAD2DEG, t.m12*RAD2DEG}, 
+			// {t.m1*RAD2DEG, t.m5*RAD2DEG, t.m9*RAD2DEG, t.m13*RAD2DEG}, 
+			// {t.m2*RAD2DEG, t.m6*RAD2DEG, t.m10*RAD2DEG, t.m14*RAD2DEG}, 
+			// {t.m3*RAD2DEG, t.m7*RAD2DEG, t.m11*RAD2DEG, t.m15*RAD2DEG}, 
+			
+		};
+		ImGui::DragFloat4("|", (float *)&v[0], 1.0f, -1000.0f, 1000.0f, "%.2f");
+		ImGui::DragFloat4("|", (float *)&v[1], 1.0f, -1000.0f, 1000.0f, "%.2f");
+		ImGui::DragFloat4("|", (float *)&v[2], 1.0f, -1000.0f, 1000.0f, "%.2f");
+		ImGui::DragFloat4("|", (float *)&v[3], 1.0f, -1000.0f, 1000.0f, "%.2f");
+		
 
 		ImGui::SeparatorText("Camera");
 		ImGui::DragFloat3("position ", (float *)&camera.c3d.position, 1.0f, -1000.0f, 1000.0f);
