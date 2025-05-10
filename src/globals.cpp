@@ -9,6 +9,7 @@ float delta = 0.0f;
 // ****** Entities
 #include "entity.h"
 EntityPool entityPool;
+EntityModels entityModels;
 
 // ****** Shaders and Textures
 #include "shader_lights.cpp"

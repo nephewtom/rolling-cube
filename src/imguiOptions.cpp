@@ -84,8 +84,8 @@ void imguiMenus(Cube& cube, CubeCamera& camera) {
 		ImGui::SeparatorText("Cube");
 		if (cube.state == Cube::QUIET)
 			ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "QUIET");
-		else if (cube.state == Cube::MOVING)
-			ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "MOVING");
+		else if (cube.state == Cube::ROLLING)
+			ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "ROLLING");
 		else if (cube.state == Cube::PUSHING)
 			ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "PUSHING");
 		else 

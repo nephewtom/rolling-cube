@@ -20,7 +20,7 @@ struct Cube {
 	Matrix accumRotations;
     
 	enum State {
-		QUIET, MOVING, PUSHING, PULLING, FAILPUSH
+		QUIET, ROLLING, PUSHING, PULLING, FAILPUSH
 	};
 	State state;
 	BoxType pullingBox;
@@ -54,6 +54,7 @@ struct Cube {
 	BoxType boxInPullDirection();
 
 	void update();
+	void applyAccumRotations();
 	void draw ();
 	void moveEnded();
 

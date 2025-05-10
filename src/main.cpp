@@ -5,6 +5,7 @@
 
 #include "log.h"
 #include "globals.cpp"
+#include "entity.cpp"
 #include "cube.cpp"
 
 #ifndef NO_IMGUI
@@ -39,6 +40,32 @@ int screenHeight = fullHD.y;
 Model semiSphere;
 
 
+void drawGrid(int slices, float spacing)
+{
+    int halfSlices = slices/2;
+
+    rlBegin(RL_LINES);
+	for (int i = -halfSlices; i <= halfSlices; i++)
+	{
+		if (i == 0)
+		{
+			rlColor3f(0.5f, 0.5f, 0.5f);
+		}
+		else
+		{
+			rlColor3f(0.75f, 0.75f, 0.75f);
+		}
+
+		rlVertex3f((float)i*spacing, -0.1f, (float)-halfSlices*spacing);
+		rlVertex3f((float)i*spacing, -0.1f, (float)halfSlices*spacing);
+
+		rlVertex3f((float)-halfSlices*spacing, -0.1f, (float)i*spacing);
+		rlVertex3f((float)halfSlices*spacing, -0.1f, (float)i*spacing);
+	}
+    rlEnd();
+}
+
+
 int main()
 {
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
@@ -64,7 +91,11 @@ int main()
 
 	ground.init(sld.shader, sld.logo, "./assets/test-map.png");
 	entityPool.init(1000);
+	entityModels.init();
 	PositionIndex initPos = setupMap();
+	
+	
+	
 	
 	Vector3 cubeInitPos = { initPos.x + 0.5f, 0.51f, initPos.z+ 0.5f};
 	cube.init(cubeInitPos);
@@ -80,32 +111,14 @@ int main()
 	rlImGuiSetup(true);
 #endif
 
-	{
-		Mesh sphere = GenMeshHemiSphere(0.5, 32, 32);
-		semiSphere = LoadModelFromMesh(sphere);
-		semiSphere.materials[0].shader = sld.shader;
-		semiSphere.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = ground.logoGround;
-		
-		Mesh plane = GenMeshPlane(100.0f, 100.0f, 10, 10); // 10x10 plane, 1x1 subdivision
-		Vector2 *uvs = (Vector2 *)plane.texcoords;
-		for (int i = 0; i < plane.vertexCount; i++)
-		{
-			uvs[i].x *= 4.0f; // Tile 4 times in X
-			uvs[i].y *= 4.0f; // Tile 4 times in Y
-		}
-		Model model = LoadModelFromMesh(plane);
-		model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = ground.logoGround;
-		
-	}
+	Mesh sphere = GenMeshHemiSphere(0.5, 32, 32);
+	semiSphere = LoadModelFromMesh(sphere);
+	semiSphere.materials[0].shader = sld.shader;
+	semiSphere.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = ground.logoGround;
 		
 	LOGD("Load rock");
 	Model rock = LoadModel("assets/rock.obj");
 	rock.materials[0].shader = sld.shader;
-
-	LOGD("Load tom-rock");
-	Model tom_rock = LoadModel("assets/tom-rockObj.obj");
-	tom_rock.materials[0].shader = sld.shader;
-	tom_rock.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = LoadTexture("assets/Rock020_2K-PNG_Color.png");
 
 	LOGD("Load tom-rock");
 	Model tom_rock2 = LoadModel("assets/tom-rock.obj");
@@ -121,7 +134,14 @@ int main()
 	LOGD("Load cubeObjModel");	
 	Model cubeObjModel = LoadModel("assets/tom-cube.obj");
 	cubeObjModel.materials[0].shader = sld.shader;
-		
+
+	Model cubeWithLogo = LoadModelFromMesh(GenMeshCube(1,1,1));
+	cubeWithLogo.materials[0].shader = sld.shader;
+	cubeWithLogo.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = sld.logo;
+	
+	Model cubeWithLogo2 = LoadModelFromMesh(GenMeshCube(1,1,1));
+	// cubeWithLogo.materials[0].shader = sld.shader;
+	cubeWithLogo2.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = sld.logo;
 	
 	while (!WindowShouldClose()) // Main game loop
 	{
@@ -172,23 +192,19 @@ int main()
 				if (ops.coloredGround) {
 					ground.drawColored();
 				} else {
-					// ground.drawInstances(sld.shader);
-					// DrawPlane({ 0, -0.2, 0.0f}, { 1000.0f, 1000.f}, BROWN);
-					// DrawModel(model, (Vector3){ 0, -0.2, 0 }, 1.0f, WHITE);
-					DrawGrid(200, 1);
-					DrawModel(rock, { 9.5f, 0.2f, 17.5f }, 0.30f, WHITE);
-					DrawModel(tom_rock, { 9.5f, 0.2f, 19.5f }, 1.0f, WHITE);
-					DrawModel(tom_rock2, { 9.5f, 0.2f, 21.5f }, 1.0f, WHITE);
+					ground.drawInstances(sld.shader);
+					drawGrid(200, 1);
+					DrawModel(rock, { 5.5f, 0.2f, 2.5f }, 0.30f, WHITE);
+					DrawModel(tom_rock2, { 7.5f, 0.2f, 2.5f }, 1.0f, WHITE);
+					
+					DrawModel(cubeWithLogo, { 9.5f, 0.5f, 2.5f }, 1.0f, WHITE);
+					DrawModel(cubeWithLogo2, { 9.5f, 0.5f, 4.5f }, 1.0f, WHITE);
 				}
 				if (ops.drawAxis) {
 					drawAxis();
 				}
 
 				{// Draw Cube & texture sample
-					instancing = 0;
-					SetShaderValue(sld.shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
-
-						
 					// Draw several planes with ground texture to check its appearance
 					DrawModel(ground.model, {-2.5f,0.05,-2.5f}, 1.0f, RED);
 					DrawModel(ground.model, {-3.5f,0.05,-2.5f}, 1.0f, RED);
@@ -337,6 +353,9 @@ void handleKeyboard() {
 	if (IsKeyPressed(KEY_F5)) { ops.coloredGround = !ops.coloredGround; }
 	if (IsKeyPressed(KEY_F11)) { ToggleFullscreen(); }
 
+	
+	// TODO: Tom, check what this function does
+	IsKeyPressedRepeat(0);
 	
 	kb.shiftPressed = IsKeyDown(kb.pressedKey) && (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT));
 	
@@ -488,7 +507,8 @@ void drawEntities() {
 	for (int i=0; i<entityPool.getCount(); i++) {
 		Entity e = entityPool.getEntity(i);
 		Vector3 v = getPositionFromIndexes(e.pIndex);
-					
+		Vector3 vOffset = Vector3Add(v, {0, -0.5, 0});	
+		
 		Color color = 
 			e.type == OBSTACLE ? RED :
 			e.type == PUSHBOX ? BLUE : 
@@ -496,11 +516,15 @@ void drawEntities() {
 			e.type == PUSHPULLBOX ? YELLOW : 
 			MAGENTA;
 					
-		if (!e.hidden) {
-			if (e.type  == OBSTACLE)
-				DrawModel(cube.model, v, 1.0f, color);
-			else
-				DrawModel(semiSphere, Vector3Add(v, {0, -0.5, 0}), 1.0f, color);
+		if (e.type == WALL) {
+			DrawModel(entityModels.wall, v, 1.0f, RED);
+		} else if (e.type == OBSTACLE) {
+			DrawModel(entityModels.obstacle, vOffset, 1.0f, PINK);
+		} else if(!e.hidden) {
+			if (e.type  == PUSHBOX)
+				DrawModel(entityModels.pushBox, vOffset, 1.0f, color);
+			else 
+				DrawModel(entityModels.pullBox, vOffset, 1.0f, color);
 		}
 	}
 }
@@ -508,6 +532,7 @@ void drawEntities() {
 
 namespace Map {
 	Color Red = { 255, 0, 0, 255 };
+	Color Orange = { 255, 161, 0, 255 };
 	Color Green = { 0, 255, 0, 255 };
 	Color Blue = { 0, 0, 255, 255 };
 	Color Yellow = { 255, 255, 0, 255 };
@@ -531,6 +556,8 @@ PositionIndex setupMap() {
 			int colorIndex = ix + iz*ground.width;
 			Color color = ground.pixelMap[colorIndex];
 			if (ColorIsEqual(color, Map::Red)) {
+				id = entityPool.add(pi, WALL);			
+			} else if (ColorIsEqual(color, Map::Orange)) {
 				id = entityPool.add(pi, OBSTACLE);			
 			} else if (ColorIsEqual(color, Map::Green)) {
 				id = entityPool.add(pi, PULLBOX);

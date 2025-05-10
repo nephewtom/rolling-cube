@@ -37,8 +37,6 @@ void Cube::init(Vector3 initPos) {
 	pushFailWav =	LoadSound("assets/sounds/push-fail.wav");
 		
 	getIndexesFromPosition(pIndex, initPos);
-	// model.materials[0].shader = sld.shader;
-	// model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = sld.logo;
 	firstTimeCollisionWithShift = true;
 }
 
@@ -66,7 +64,7 @@ void Cube::playSound() {
 Sound& Cube::pickSound() {
 	
 	switch (state) {
-	case MOVING: return rollWav;
+	case ROLLING: return rollWav;
 	case PUSHING: return pushBoxWav;
 	case PULLING: return pullBoxWav;
 	case FAILPUSH: return pushFailWav;
@@ -131,6 +129,8 @@ void Cube::movePositiveZ() {
 	rotationPivot.z = position.z + 0.5f; // Back edge
 }
 
+// Discern the movement to do after a key press from the direction
+// note: direction changes according to mouse/camera orientation
 void Cube::setMoveStep(int pressedKey) {
 	if (direction.x == -1.0f) {
 		if (pressedKey == KEY_W) {
@@ -231,7 +231,7 @@ Cube::State Cube::checkMovement(int pressedKey) {
 		LOGD("Moving!");
 		rotationAngle = 0.0f;
 		animationProgress = 0.0f;
-		state = MOVING;
+		state = ROLLING;
 		return state;
 	}
 
@@ -301,7 +301,7 @@ BoxType Cube::boxInPushDirection(PIndex pStep) {
 	int id = ground.getEntityId(boxIndex);
 	Entity& e = entityPool.getEntity(id);
 
-	if (e.type == OBSTACLE || e.type == PULLBOX) {
+	if (e.type == OBSTACLE || e.type == PULLBOX || e.type == WALL) {
 		LOGD("OBSTACLE");
 		pushBoxesCount = 0;
 		return OBSTACLE;
@@ -339,17 +339,11 @@ void Cube::update() {
 	float t = animationProgress;
 	float smoothT = t * t * (3.0f - 2.0f * t); // Smoothstep formula
 
-	if (state == Cube::MOVING) { // cube normally moves rotating since it is a rolling cube
+	if (state == Cube::ROLLING) { // cube normally moves rotating since it is a rolling cube
 	
 		rotationAngle = 90.0f * smoothT;
-                    
-		// To proceed with the current rotation, first it is needed to reproduce how the rotation state happened.
-		// So, for a cube model that has a coordinate system not rotated and translated in current position, it has
-		// to be translated to the origin, rotated with the stored rotations and translated back.
-		Matrix translationToOrigin = MatrixTranslate(-position.x, -position.y, -position.z);
-		Matrix translationBackFromOrigin = MatrixTranslate(position.x, position.y, position.z);
-		transform = MatrixMultiply(translationToOrigin, accumRotations);
-		transform = MatrixMultiply(transform, translationBackFromOrigin);
+
+		applyAccumRotations();
 
 		// Now it the current rotation is applied using rotationPivot, rotationAxis and the changing rotationAngle
         // Combining the matrices: first translate to rotationPivot, then rotating, then translate back
@@ -367,7 +361,7 @@ void Cube::update() {
 		position.y = position.y + (nextPosition.y - position.y) * smoothT;
 		position.z = position.z + (nextPosition.z - position.z) * smoothT;
 
-		transform = MatrixTranslate(position.x, position.y, position.z);
+		applyAccumRotations();
 	}
 	
 	if (animationProgress >= 1.0f) {
@@ -375,12 +369,22 @@ void Cube::update() {
 	}
 }
 
+void Cube::applyAccumRotations() {
+	// To proceed with the current rotation, first it is needed to reproduce how the rotation state happened.
+	// So, for a cube model that has a coordinate system not rotated and translated in current position, it has
+	// to be translated to the origin, rotated with the stored rotations and translated back.
+	Matrix translationToOrigin = MatrixTranslate(-position.x, -position.y, -position.z);
+	Matrix translationBackFromOrigin = MatrixTranslate(position.x, position.y, position.z);
+	transform = MatrixMultiply(translationToOrigin, accumRotations);
+	transform = MatrixMultiply(transform, translationBackFromOrigin);
+}
+
 void Cube::moveEnded() {
 		
 	position = nextPosition;
 	animationProgress = 0.0f;
 		
-	if (state == MOVING) {
+	if (state == ROLLING) {
 		
 		pitchChange = KeyDelay::lerpPitch(kb.pressReleaseTime, 0.03f, 0.3f);
 		SetSoundPitch(rollWav, pitchChange);
@@ -446,20 +450,14 @@ void Cube::moveEnded() {
 //********** Drawing
 void Cube::draw() {
 
-	if (state == QUIET) {
-		rlPushMatrix();
-		rlMultMatrixf(MatrixToFloat(transform));
-		DrawModel(model, position, 1.0f, facesColor);
-		rlPopMatrix();
+	rlPushMatrix();
+	rlMultMatrixf(MatrixToFloat(transform));
+	DrawModel(model, position, 1.0f, facesColor);
+	rlPopMatrix();
 		
-	} else if (state == MOVING) {
-		
-		rlPushMatrix();
-		rlMultMatrixf(MatrixToFloat(transform));
-		DrawModel(model, position, 1.0f, facesColor);
-		rlPopMatrix();
+	if (state == ROLLING) {
 
-		if (state == MOVING) { // Only show cilinder when rotating
+		if (state == ROLLING) { // Only show cilinder when rotating
 			Vector3 vOffset = Vector3Scale(rotationAxis, 0.2);
 			DrawCylinderEx(Vector3Subtract(rotationPivot, vOffset),
 						   Vector3Add(rotationPivot, vOffset),
@@ -467,8 +465,6 @@ void Cube::draw() {
 		}
 
 	} else if (state == PUSHING || state == PULLING) {
-		// Draw THE CUBE
-		DrawModel(model, position, 1.0f, facesColor);
 		
 		if (state == PUSHING) {
 			// Draw pushing cubes
@@ -478,9 +474,11 @@ void Cube::draw() {
 			for (int i=0; i<pushBoxesCount; i++) {
 				int id = ground.getEntityId(boxIndex);
 				Entity& e = entityPool.getEntity(id);
+				
 				Color color = e.type == PUSHBOX ? BLUE : YELLOW;
-				Vector3 pushCubePos = Vector3Add(position, increment);				
-				DrawModel(model, pushCubePos, 1.0f, color);
+				Vector3 pushCubePos = Vector3Add(position, increment);
+				
+				DrawModel(entityModels.pushBox, pushCubePos, 1.0f, color);
 				boxIndex = boxIndex + pStep;
 				increment = Vector3Add(increment, moveStep);
 			}
@@ -490,7 +488,8 @@ void Cube::draw() {
 			Vector3 oppositeMoveStep = Vector3Scale(moveStep, -1.0);
 			pullCubePos = Vector3Add(position, oppositeMoveStep);
 			Color color = pullingBox == PULLBOX ? GREEN : YELLOW;
-			DrawModel(model, pullCubePos, 1.0f, color);
+
+			DrawModel(entityModels.pullBox, pullCubePos, 1.0f, color);
 		}
 	}
 }

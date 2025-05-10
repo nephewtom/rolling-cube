@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include "raylib.h"
 
 struct PositionIndex {
 	int x;
@@ -29,12 +30,13 @@ struct EntityQuery {
 };
 
 enum BoxType {
-	NONE, OBSTACLE, PUSHBOX, PULLBOX, PUSHPULLBOX, OTHER
+	NONE, WALL, OBSTACLE, PUSHBOX, PULLBOX, PUSHPULLBOX, OTHER
 };
 
-const char* getBoxType(BoxType type) {
+inline const char* getBoxType(BoxType type) {
 	const char* s = 
 		type == NONE ? "NONE" :
+		type == WALL ? "WALL" :
 		type == OBSTACLE ? "OBSTACLE" :
 		type == PUSHBOX ? "PUSHBOX" :
 		type == PULLBOX ? "PULLBOX" :
@@ -48,6 +50,17 @@ public:
 	PIndex pIndex;
 	BoxType type;
 	bool hidden;
+};
+
+class EntityModels {
+public:
+	Model wall;
+	Model obstacle;
+	Model pushBox;
+	Model pullBox;
+	Model pushPullBox;
+	
+	void init();
 };
 
 class EntityPool {
@@ -104,7 +117,7 @@ public:
 		return id;
 	}
 
-    // Remove an obstacle from the pool
+	// Remove an obstacle from the pool
 	// Input: id of the obstacle
 	// Output: the PositionIndex of the swapped id, so ground.cell[ix][iz].obstacleId gets updated
 	void remove(EntityQuery& eq) {
@@ -118,7 +131,6 @@ public:
 		// Return swaped pIndex
 		eq.pIndex = _entity[eq.id].pIndex;
 	}
-
 };
 
 #endif

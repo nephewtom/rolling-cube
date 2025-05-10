@@ -108,6 +108,8 @@ struct Ground {
 		BeginShaderMode(shader);
 		DrawMeshInstanced(plane, material, transforms, width*height);
 		EndShaderMode();
+		instancing = 0;
+		SetShaderValue(shader, instancingLoc, &instancing, SHADER_UNIFORM_INT);
 	}
 
 	bool isEmptyCell(PIndex pIndex) {
