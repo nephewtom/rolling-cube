@@ -36,12 +36,14 @@ void Update(float delta);
 void Draw(void);
 void Close();
 
+const int width = 1920;
+const int height = 1080;
 
 /* === Main program === */
 
 int main(void)
 {
-	InitWindow(1920, 1080, "");
+	InitWindow(width, height, "");
 
 	const char* title = Init();
 	SetWindowTitle(title);

@@ -79,6 +79,9 @@ transparency: $(OBJDIR)/transparency.o
 tom: $(OBJDIR)/tom.o
 	$(CXX) -o $@ $< $(PATH_LIBS) $(LIBS) $(IMGUILIB)
 
+basic_tom: $(OBJDIR)/basic_tom.o
+	$(CXX) -o $@ $< $(PATH_LIBS) $(LIBS) $(IMGUILIB)
+
 all: basic bloom directional fog instanced lights particles pbr resize skybox sponza sprite tom transparency
 
 clean:

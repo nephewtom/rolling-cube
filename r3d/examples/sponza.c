@@ -1,4 +1,5 @@
 #include "./common.h"
+#include "r3d.h"
 #include <rlgl.h>
 
 /* === Resources === */
@@ -20,7 +21,7 @@ const char* Init(void)
 
     R3D_SetSSAO(true);
     R3D_SetSSAORadius(4.0f);
-    R3D_SetBloomMode(R3D_BLOOM_SOFT_LIGHT);
+    R3D_SetBloomMode(R3D_BLOOM_MIX);
 
     sponza = RES_LoadModel("sponza.glb");
 
@@ -43,12 +44,16 @@ const char* Init(void)
     // NOTE: Toggle sky with 'T' key
     skybox = R3D_LoadSkybox(RESOURCES_PATH "sky/skybox3.png", CUBEMAP_LAYOUT_AUTO_DETECT);
 
-    for (int i = 0; i < 2; i++) {
-        lights[i] = R3D_CreateLight(R3D_LIGHT_SPOT);
 
-        R3D_SetLightPosition(lights[i], (Vector3) { i ? -10 : 10, 20, 0 });
-        R3D_SetLightTarget(lights[i], (Vector3) { 0, 0, 0 });
+    BoundingBox sceneBounds = GetModelBoundingBox(sponza);
+    R3D_SetSceneBounds(sceneBounds);
+
+    for (int i = 0; i < 2; i++) {
+        lights[i] = R3D_CreateLight(R3D_LIGHT_DIR);
+
+        R3D_LightLookAt(lights[i], (Vector3) { i ? -10 : 10, 20, 0 }, Vector3Zero());
         R3D_SetLightActive(lights[i], true);
+        R3D_SetLightEnergy(lights[i], 10.0f);
 
         R3D_SetShadowUpdateMode(lights[i], R3D_SHADOW_UPDATE_MANUAL);
         R3D_EnableShadow(lights[i], 4096);

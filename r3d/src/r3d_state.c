@@ -78,6 +78,33 @@ static char* r3d_shader_inject_defines(const char* code, const char* defines[], 
     return newShader;
 }
 
+static void r3d_texture_create_hdr(int width, int height)
+{
+    if (R3D.support.TEX_R11G11B10F) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R11F_G11F_B10F, width, height, 0, GL_RGB, GL_FLOAT, NULL);
+    }
+    else if (R3D.support.TEX_RGB16F) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, NULL);
+    }
+    else if (R3D.support.TEX_RGB32F) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, width, height, 0, GL_RGB, GL_FLOAT, NULL);
+    }
+    else /* 8-bit fallback - non-HDR */ {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    }
+}
+
+
+/* === Helper functions === */
+
+bool r3d_check_texture_format_support(unsigned int format)
+{
+    GLint supported = GL_FALSE;
+    glGetInternalformativ(GL_TEXTURE_2D, format, GL_INTERNALFORMAT_SUPPORTED, 1, &supported);
+    return (supported == GL_TRUE);
+}
+
+
 /* === Main loading functions === */
 
 void r3d_framebuffers_load(int width, int height)
@@ -92,7 +119,7 @@ void r3d_framebuffers_load(int width, int height)
     }
 
     if (R3D.env.bloomMode != R3D_BLOOM_DISABLED) {
-        r3d_framebuffer_load_pingpong_bloom(width, height);
+        r3d_framebuffer_load_mipchain_bloom(width, height);
     }
 }
 
@@ -101,14 +128,14 @@ void r3d_framebuffers_unload(void)
     r3d_framebuffer_unload_gbuffer();
     r3d_framebuffer_unload_deferred();
     r3d_framebuffer_unload_scene();
-    r3d_framebuffer_unload_post();
+    r3d_framebuffer_unload_pingpong_post();
 
     if (R3D.framebuffer.pingPongSSAO.id != 0) {
         r3d_framebuffer_unload_pingpong_ssao();
     }
 
-    if (R3D.framebuffer.pingPongBloom.id != 0) {
-        r3d_framebuffer_unload_pingpong_bloom();
+    if (R3D.framebuffer.mipChainBloom.id != 0) {
+        r3d_framebuffer_unload_mipchain_bloom();
     }
 }
 
@@ -141,7 +168,6 @@ void r3d_textures_unload(void)
 void r3d_shaders_load(void)
 {
     // Load generation shaders
-    r3d_shader_load_generate_gaussian_blur_dual_pass();
     r3d_shader_load_generate_cubemap_from_equirectangular();
     r3d_shader_load_generate_irradiance_convolution();
     r3d_shader_load_generate_prefilter();
@@ -166,9 +192,12 @@ void r3d_shaders_load(void)
     r3d_shader_load_screen_adjustment();
 
     if (R3D.env.ssaoEnabled) {
+        r3d_shader_load_generate_gaussian_blur_dual_pass();
         r3d_shader_load_screen_ssao();
     }
     if (R3D.env.bloomMode != R3D_BLOOM_DISABLED) {
+        r3d_shader_load_generate_downsampling();
+        r3d_shader_load_generate_upsampling();
         r3d_shader_load_screen_bloom();
     }
     if (R3D.env.fogMode != R3D_FOG_DISABLED) {
@@ -234,18 +263,32 @@ void r3d_framebuffer_load_gbuffer(int width, int height)
 
     rlEnableFramebuffer(gBuffer->id);
 
-    // Generate (albedo / orm / emission / material ID) buffers
+    // Generate (albedo / orm) buffers
     gBuffer->albedo = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8, 1);
-    gBuffer->emission = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16, 1);
     gBuffer->orm = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R5G6B5, 1);
 
+    // Generate emission buffer
+    glGenTextures(1, &gBuffer->emission);
+    glBindTexture(GL_TEXTURE_2D, gBuffer->emission);
+
+    r3d_texture_create_hdr(width, height);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    
     // We generate the normal buffer here.
     // The setup for the normal buffer requires direct API calls
     // since RLGL does not support the creation of 16-bit two-component textures.
     // Normals will be encoded and decoded using octahedral mapping for efficient storage and reconstruction.
     glGenTextures(1, &gBuffer->normal);
     glBindTexture(GL_TEXTURE_2D, gBuffer->normal);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, width, height, 0, GL_RG, GL_FLOAT, NULL);
+    if ((R3D.state.flags & R3D_FLAG_8_BIT_NORMALS) || (R3D.support.TEX_RG16F == false)) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, width, height, 0, GL_RG, GL_UNSIGNED_BYTE, NULL);
+    }
+    else {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, width, height, 0, GL_RG, GL_FLOAT, NULL);
+    }
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -295,23 +338,19 @@ void r3d_framebuffer_load_pingpong_ssao(int width, int height)
     rlEnableFramebuffer(ssao->id);
 
     // Generate (ssao) buffers
-    glGenTextures(1, &ssao->source);
-    glBindTexture(GL_TEXTURE_2D, ssao->source);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    glGenTextures(1, &ssao->target);
-    glBindTexture(GL_TEXTURE_2D, ssao->target);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
+    GLuint textures[2];
+    glGenTextures(2, textures);
+    for (int i = 0; i < 2; i++) {
+        glBindTexture(GL_TEXTURE_2D, textures[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
     glBindTexture(GL_TEXTURE_2D, 0);
+    ssao->target = textures[0];
+    ssao->source = textures[1];
 
     // Activate the draw buffers for all the attachments
     rlActiveDrawBuffers(1);
@@ -336,24 +375,24 @@ void r3d_framebuffer_load_deferred(int width, int height)
 
     rlEnableFramebuffer(deferred->id);
 
-    // Generate (ambient / diffuse / specular) buffers
-    deferred->diffuse = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16, 1);
-    deferred->specular = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16, 1);
+    // Generate diffuse/specular textures
+    GLuint textures[2];
+    glGenTextures(2, textures);
+    for (int i = 0; i < 2; i++) {
+        glBindTexture(GL_TEXTURE_2D, textures[i]);
 
-    // Setup diffuse texture parameters
-    glBindTexture(GL_TEXTURE_2D, deferred->diffuse);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        r3d_texture_create_hdr(width, height);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
     glBindTexture(GL_TEXTURE_2D, 0);
-
-    // Setup specular texture parameters
-    glBindTexture(GL_TEXTURE_2D, deferred->specular);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    deferred->diffuse = textures[0];
+    deferred->specular = textures[1];
 
     // Activate the draw buffers for all the attachments
-    rlActiveDrawBuffers(3);
+    rlActiveDrawBuffers(2);
 
     // Attach the textures to the framebuffer
     rlFramebufferAttach(deferred->id, deferred->diffuse, RL_ATTACHMENT_COLOR_CHANNEL0, RL_ATTACHMENT_TEXTURE2D, 0);
@@ -376,28 +415,15 @@ void r3d_framebuffer_load_scene(int width, int height)
 
     rlEnableFramebuffer(scene->id);
 
-    // Generate (color / luminance) buffers
-    scene->color = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8, 1);
-    scene->bright = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16A16, 1);
-
-    // Setup color texture parameters
+    // Generate color texture
+    glGenTextures(1, &scene->color);
     glBindTexture(GL_TEXTURE_2D, scene->color);
+
+    r3d_texture_create_hdr(width, height);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    // Setup bright texture parameters
-    glBindTexture(GL_TEXTURE_2D, scene->bright);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    // Activate the draw buffers for all the attachments
-    rlActiveDrawBuffers(2);
-
-    // Attach the textures to the framebuffer
-    rlFramebufferAttach(scene->id, scene->color, RL_ATTACHMENT_COLOR_CHANNEL0, RL_ATTACHMENT_TEXTURE2D, 0);
-    rlFramebufferAttach(scene->id, scene->bright, RL_ATTACHMENT_COLOR_CHANNEL1, RL_ATTACHMENT_TEXTURE2D, 0);
 
     // Attach the depth-stencil buffer from the G-buffer
     glFramebufferTexture2D(
@@ -405,54 +431,76 @@ void r3d_framebuffer_load_scene(int width, int height)
         GL_TEXTURE_2D, R3D.framebuffer.gBuffer.depth, 0
     );
 
+    // Activate the draw buffers for all the attachments
+    rlActiveDrawBuffers(1);
+
+    // Attach the textures to the framebuffer
+    rlFramebufferAttach(scene->id, scene->color, RL_ATTACHMENT_COLOR_CHANNEL0, RL_ATTACHMENT_TEXTURE2D, 0);
+
     // Check if the framebuffer is complete
     if (!rlFramebufferComplete(scene->id)) {
         TraceLog(LOG_WARNING, "Framebuffer is not complete");
     }
 }
 
-void r3d_framebuffer_load_pingpong_bloom(int width, int height)
+void r3d_framebuffer_load_mipchain_bloom(int width, int height)
 {
-    struct r3d_fb_pingpong_bloom_t* bloom = &R3D.framebuffer.pingPongBloom;
+    struct r3d_fb_mipchain_bloom_t* bloom = &R3D.framebuffer.mipChainBloom;
 
-    width /= 2, height /= 2;
+    glGenFramebuffers(1, &bloom->id);
+    glBindFramebuffer(GL_FRAMEBUFFER, bloom->id);
 
-    bloom->id = rlLoadFramebuffer();
-    if (bloom->id == 0) {
-        TraceLog(LOG_WARNING, "Failed to create framebuffer");
+    int mipChainLength = (int)floor(log2(fminf(width, height)));
+
+    bloom->mipChain = MemAlloc(mipChainLength * sizeof(struct r3d_mip_bloom_t));
+    if (bloom->mipChain == NULL) {
+        TraceLog(LOG_ERROR, "R3D: Failed to allocate memory to store bloom mip chain");
     }
 
-    rlEnableFramebuffer(bloom->id);
+    bloom->mipCount = mipChainLength;
 
-    // Generate (color) buffers
-    glGenTextures(1, &bloom->source);
-    glBindTexture(GL_TEXTURE_2D, bloom->source);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    int iMipW = width;
+    int iMipH = height;
+    float fMipW = (float)iMipW;
+    float fMipH = (float)iMipH;
 
-    glGenTextures(1, &bloom->target);
-    glBindTexture(GL_TEXTURE_2D, bloom->target);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    for (GLuint i = 0; i < mipChainLength; i++) {
 
-    glBindTexture(GL_TEXTURE_2D, 0);
+        struct r3d_mip_bloom_t* mip = &bloom->mipChain[i];
+    
+        iMipW /= 2;
+        iMipH /= 2;
+        fMipW *= 0.5f;
+        fMipH *= 0.5f;
 
-    // Activate the draw buffers for all the attachments
-    rlActiveDrawBuffers(1);
+        mip->iW = iMipW;
+        mip->iH = iMipH;
+        mip->fW = fMipW;
+        mip->fH = fMipH;
 
-    // Attach the textures to the framebuffer
-    rlFramebufferAttach(bloom->id, bloom->target, RL_ATTACHMENT_COLOR_CHANNEL0, RL_ATTACHMENT_TEXTURE2D, 0);
+        glGenTextures(1, &mip->id);
+        glBindTexture(GL_TEXTURE_2D, mip->id);
 
-    // Check if the framebuffer is complete
-    if (!rlFramebufferComplete(bloom->id)) {
+        // we are downscaling an HDR color buffer, so we need a float texture format
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R11F_G11F_B10F, iMipW, iMipH, 0, GL_RGB, GL_FLOAT, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    }
+
+    // Attach first mip to the framebuffer
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bloom->mipChain[0].id, 0);
+
+    GLenum attachments[1] = { GL_COLOR_ATTACHMENT0 };
+    glDrawBuffers(1, attachments);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         TraceLog(LOG_WARNING, "Framebuffer is not complete");
     }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void r3d_framebuffer_load_pingpong_post(int width, int height)
@@ -467,8 +515,20 @@ void r3d_framebuffer_load_pingpong_post(int width, int height)
     rlEnableFramebuffer(post->id);
 
     // Generate (color) buffers
-    post->source = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8, 1);
-    post->target = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8, 1);
+    GLuint textures[2];
+    glGenTextures(2, textures);
+    for (int i = 0; i < 2; i++) {
+        glBindTexture(GL_TEXTURE_2D, textures[i]);
+
+        r3d_texture_create_hdr(width, height);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    post->target = textures[0];
+    post->source = textures[1];
 
     // Activate the draw buffers for all the attachments
     rlActiveDrawBuffers(1);
@@ -526,26 +586,29 @@ void r3d_framebuffer_unload_scene(void)
     struct r3d_fb_scene_t* scene = &R3D.framebuffer.scene;
 
     rlUnloadTexture(scene->color);
-    rlUnloadTexture(scene->bright);
 
     rlUnloadFramebuffer(scene->id);
 
     memset(scene, 0, sizeof(struct r3d_fb_scene_t));
 }
 
-void r3d_framebuffer_unload_pingpong_bloom(void)
+void r3d_framebuffer_unload_mipchain_bloom(void)
 {
-    struct r3d_fb_pingpong_bloom_t* bloom = &R3D.framebuffer.pingPongBloom;
+    struct r3d_fb_mipchain_bloom_t* bloom = &R3D.framebuffer.mipChainBloom;
 
-    rlUnloadTexture(bloom->source);
-    rlUnloadTexture(bloom->target);
+    for (int i = 0; i < bloom->mipCount; i++) {
+        glDeleteTextures(1, &bloom->mipChain[i].id);
+    }
+    glDeleteFramebuffers(1, &bloom->id);
 
-    rlUnloadFramebuffer(bloom->id);
+    MemFree(bloom->mipChain);
 
-    memset(bloom, 0, sizeof(struct r3d_fb_pingpong_bloom_t));
+    bloom->mipChain = NULL;
+    bloom->mipCount = 0;
+    bloom->id = 0;
 }
 
-void r3d_framebuffer_unload_post(void)
+void r3d_framebuffer_unload_pingpong_post(void)
 {
     struct r3d_fb_pingpong_post_t* post = &R3D.framebuffer.post;
 
@@ -571,6 +634,35 @@ void r3d_shader_load_generate_gaussian_blur_dual_pass(void)
 
     r3d_shader_enable(generate.gaussianBlurDualPass);
     r3d_shader_set_sampler2D_slot(generate.gaussianBlurDualPass, uTexture, 0);
+    r3d_shader_disable();
+}
+
+void r3d_shader_load_generate_downsampling(void)
+{
+    R3D.shader.generate.downsampling.id = rlLoadShaderCode(
+        VS_COMMON_SCREEN, FS_GENERATE_DOWNSAMPLING
+    );
+
+    r3d_shader_get_location(generate.downsampling, uTexture);
+    r3d_shader_get_location(generate.downsampling, uResolution);
+    r3d_shader_get_location(generate.downsampling, uMipLevel);
+
+    r3d_shader_enable(generate.downsampling);
+    r3d_shader_set_sampler2D_slot(generate.downsampling, uTexture, 0);
+    r3d_shader_disable();
+}
+
+void r3d_shader_load_generate_upsampling(void)
+{
+    R3D.shader.generate.upsampling.id = rlLoadShaderCode(
+        VS_COMMON_SCREEN, FS_GENERATE_UPSAMPLING
+    );
+
+    r3d_shader_get_location(generate.upsampling, uTexture);
+    r3d_shader_get_location(generate.upsampling, uFilterRadius);
+
+    r3d_shader_enable(generate.upsampling);
+    r3d_shader_set_sampler2D_slot(generate.upsampling, uTexture, 0);
     r3d_shader_disable();
 }
 
@@ -722,7 +814,6 @@ void r3d_shader_load_raster_forward(void)
     r3d_shader_get_location(raster.forward, uQuatSkybox);
     r3d_shader_get_location(raster.forward, uHasSkybox);
     r3d_shader_get_location(raster.forward, uAlphaScissorThreshold);
-    r3d_shader_get_location(raster.forward, uBloomHdrThreshold);
     r3d_shader_get_location(raster.forward, uViewPosition);
 
     r3d_shader_enable(raster.forward);
@@ -802,7 +893,6 @@ void r3d_shader_load_raster_forward_inst(void)
     r3d_shader_get_location(raster.forwardInst, uQuatSkybox);
     r3d_shader_get_location(raster.forwardInst, uHasSkybox);
     r3d_shader_get_location(raster.forwardInst, uAlphaScissorThreshold);
-    r3d_shader_get_location(raster.forwardInst, uBloomHdrThreshold);
     r3d_shader_get_location(raster.forwardInst, uViewPosition);
 
     r3d_shader_enable(raster.forwardInst);
@@ -858,7 +948,6 @@ void r3d_shader_load_raster_skybox(void)
     r3d_shader_get_location(raster.skybox, uMatView);
     r3d_shader_get_location(raster.skybox, uRotation);
     r3d_shader_get_location(raster.skybox, uCubeSky);
-    r3d_shader_get_location(raster.skybox, uBloomHdrThreshold);
 
     r3d_shader_enable(raster.skybox);
     r3d_shader_set_samplerCube_slot(raster.skybox, uCubeSky, 0);
@@ -872,6 +961,9 @@ void r3d_shader_load_raster_depth(void)
     );
 
     r3d_shader_get_location(raster.depth, uMatMVP);
+    r3d_shader_get_location(raster.depth, uAlpha);
+    r3d_shader_get_location(raster.depth, uTexAlbedo);
+    r3d_shader_get_location(raster.depth, uAlphaScissorThreshold);
 }
 
 void r3d_shader_load_raster_depth_inst(void)
@@ -884,6 +976,9 @@ void r3d_shader_load_raster_depth_inst(void)
     r3d_shader_get_location(raster.depthInst, uMatModel);
     r3d_shader_get_location(raster.depthInst, uMatVP);
     r3d_shader_get_location(raster.depthInst, uBillboardMode);
+    r3d_shader_get_location(raster.depthInst, uAlpha);
+    r3d_shader_get_location(raster.depthInst, uTexAlbedo);
+    r3d_shader_get_location(raster.depthInst, uAlphaScissorThreshold);
 }
 
 void r3d_shader_load_raster_depth_cube(void)
@@ -896,6 +991,9 @@ void r3d_shader_load_raster_depth_cube(void)
     r3d_shader_get_location(raster.depthCube, uMatModel);
     r3d_shader_get_location(raster.depthCube, uMatMVP);
     r3d_shader_get_location(raster.depthCube, uFar);
+    r3d_shader_get_location(raster.depthCube, uAlpha);
+    r3d_shader_get_location(raster.depthCube, uTexAlbedo);
+    r3d_shader_get_location(raster.depthCube, uAlphaScissorThreshold);
 }
 
 void r3d_shader_load_raster_depth_cube_inst(void)
@@ -910,6 +1008,9 @@ void r3d_shader_load_raster_depth_cube_inst(void)
     r3d_shader_get_location(raster.depthCubeInst, uMatVP);
     r3d_shader_get_location(raster.depthCubeInst, uFar);
     r3d_shader_get_location(raster.depthCubeInst, uBillboardMode);
+    r3d_shader_get_location(raster.depthCubeInst, uAlpha);
+    r3d_shader_get_location(raster.depthCubeInst, uTexAlbedo);
+    r3d_shader_get_location(raster.depthCubeInst, uAlphaScissorThreshold);
 }
 
 void r3d_shader_load_screen_ssao(void)
@@ -1053,7 +1154,6 @@ void r3d_shader_load_screen_scene(void)
     r3d_shader_get_location(screen.scene, uTexEmission);
     r3d_shader_get_location(screen.scene, uTexDiffuse);
     r3d_shader_get_location(screen.scene, uTexSpecular);
-    r3d_shader_get_location(screen.scene, uBloomHdrThreshold);
 
     r3d_shader_enable(screen.scene);
 
@@ -1227,6 +1327,8 @@ void r3d_texture_load_ssao_kernel(void)
 
 void r3d_texture_load_ibl_brdf_lut(void)
 {
+    // TODO: Review in case 'R3D.support.TEX_RG16F' is false
+
     Image img = { 0 };
 
     uint32_t width = 0, height = 0;

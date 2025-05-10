@@ -6,7 +6,6 @@ static Model		plane = { 0 };
 static Model		sphere = { 0 };
 static Model		cube = { 0 };
 static Model        cube2 = {0};
-static Model		laser = { 0 };
 static Camera3D		camera = { 0 };
 
 
@@ -49,22 +48,6 @@ const char* Init(void)
 	Texture t2Color = LoadTexture("./logo.png");
 	R3D_SetMaterialAlbedo(&cube2.materials[0], &t2Color, WHITE);
 
-
-	/* R3D_SetBloomMode(R3D_BLOOM_ADDITIVE); */
-	/* R3D_SetBloomIntensity(3.0f); */
-	laser = LoadModelFromMesh(GenMeshCylinder(0.1, 5, 16));
-	laser.transform = MatrixMultiply(laser.transform, MatrixRotateX(PI / 2.0f));
-	Material lMaterial = LoadMaterialDefault();
-	lMaterial.maps[MATERIAL_MAP_EMISSION].value = 1.0f;
-	lMaterial.maps[MATERIAL_MAP_OCCLUSION].value = 1.0f;
-	lMaterial.maps[MATERIAL_MAP_ROUGHNESS].value = (float)3 / 5;
-	lMaterial.maps[MATERIAL_MAP_METALNESS].value = (float)3 / 5;
-	lMaterial.maps[MATERIAL_MAP_ALBEDO].color = ColorFromHSV(5 / 5.0f * 330, 1.0f, 1.0f);
-	lMaterial.maps[MATERIAL_MAP_EMISSION].color = lMaterial.maps[MATERIAL_MAP_ALBEDO].color;
-	lMaterial.maps[MATERIAL_MAP_EMISSION].texture = lMaterial.maps[MATERIAL_MAP_ALBEDO].texture;
-
-	
-		
 	
 	camera = (Camera3D) {
 		.position = (Vector3) { 5, 3, 5 },
@@ -109,15 +92,7 @@ void Draw(void)
 {
 
 	R3D_Begin(camera);
-  	R3D_SetBloomMode(R3D_BLOOM_ADDITIVE);
-	R3D_SetBloomIntensity(1.5f);
 	R3D_DrawModel(cube2, (Vector3){2.0, 0.0f, -2.0f}, 1.0f);
-	R3D_DrawModel(laser, (Vector3){-2 * 1.1f, -2 * 1.1f, 0.0f}, 1.0f);
-	R3D_End();
-
-	R3D_Begin(camera);
-  	R3D_SetBloomMode(R3D_BLOOM_DISABLED);
-	R3D_SetBloomIntensity(0.0f);
 	R3D_DrawModel(plane, (Vector3) { 0, -0.5f, 0 }, 1.0f);
 	R3D_DrawModel(sphere, (Vector3) { 0.0 }, 1.0f);
 	R3D_DrawModel(cube, (Vector3){-2.0, 0.0f, 2.0f}, 1.0f);

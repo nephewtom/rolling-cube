@@ -10,6 +10,8 @@ static Model		laser = { 0 };
 static R3D_Skybox	skybox = { 0 };
 static Camera3D		camera = { 0 };
 
+static Model        cube = { 0 };
+
 static Material materials[5 * 5] = { 0 };
 
 
@@ -19,7 +21,8 @@ const char* Init(void)
     R3D_Init(GetScreenWidth(), GetScreenHeight(), 0);
     SetTargetFPS(60);
 
-    R3D_SetBloomMode(R3D_BLOOM_ADDITIVE);
+	SetMousePosition(width/2,height/2);
+	R3D_SetBloomMode(R3D_BLOOM_ADDITIVE);
 
     float bi = R3D_GetBloomIntensity();
 	printf("bi: %f\n", bi);
@@ -28,25 +31,56 @@ const char* Init(void)
 	sphere = LoadModelFromMesh(GenMeshSphere(0.5f, 64, 64));
     laser = LoadModelFromMesh(GenMeshCylinder(0.1, 5, 16));
     laser.transform = MatrixMultiply(laser.transform, MatrixRotateX(PI/2.0f));
+
+	cube = LoadModelFromMesh(GenMeshCube(1.0f, 1.0f, 1.0f));
 	
 	UnloadMaterial(sphere.materials[0]);
 	UnloadMaterial(laser.materials[0]);
+	UnloadMaterial(cube.materials[0]);
 
-    for (int y = 0; y < 5; y++) {
-        for (int x = 0; x < 5; x++) {
-            int i = y * 5 + x;
-            materials[i] = LoadMaterialDefault();
-            materials[i].maps[MATERIAL_MAP_EMISSION].value = 1.0f;
-            materials[i].maps[MATERIAL_MAP_OCCLUSION].value = 1.0f;
-            materials[i].maps[MATERIAL_MAP_ROUGHNESS].value = (float)x / 5;
-            materials[i].maps[MATERIAL_MAP_METALNESS].value = (float)y / 5;
-            materials[i].maps[MATERIAL_MAP_ALBEDO].color = ColorFromHSV(x / 5.0f * 330, 1.0f, 1.0f);
-            materials[i].maps[MATERIAL_MAP_EMISSION].color = materials[i].maps[MATERIAL_MAP_ALBEDO].color;
-            materials[i].maps[MATERIAL_MAP_EMISSION].texture = materials[i].maps[MATERIAL_MAP_ALBEDO].texture;
-        }
-    }
+	laser.materials[0] = LoadMaterialDefault();
+	for (int i = 0; i<laser.materialCount; i++) {
+		laser.materials[i].maps[MATERIAL_MAP_EMISSION].value = 1.0f;
+		laser.materials[i].maps[MATERIAL_MAP_OCCLUSION].value = 1.0f;
+		laser.materials[i].maps[MATERIAL_MAP_ROUGHNESS].value = (float)1 / 5;
+		laser.materials[i].maps[MATERIAL_MAP_METALNESS].value = (float)1 / 5;
+		laser.materials[i].maps[MATERIAL_MAP_ALBEDO].color = ColorFromHSV(0.f, 1.0f, 1.0f);
+		laser.materials[i].maps[MATERIAL_MAP_EMISSION].color = laser.materials[i].maps[MATERIAL_MAP_ALBEDO].color;
+		laser.materials[i].maps[MATERIAL_MAP_EMISSION].texture = laser.materials[i].maps[MATERIAL_MAP_ALBEDO].texture;	
+	}
+	
+	Texture2D logo = LoadTexture("resources/logo.png");
+	
+	for (int i = 0; i<cube.materialCount; i++) {
+		cube.materials[i] = LoadMaterialDefault();
+		cube.materials[i].maps[MATERIAL_MAP_EMISSION].value = 1.0f;
+		cube.materials[i].maps[MATERIAL_MAP_OCCLUSION].value = 1.0f;
+		cube.materials[i].maps[MATERIAL_MAP_ROUGHNESS].value = (float)1 / 5;
+		cube.materials[i].maps[MATERIAL_MAP_METALNESS].value = (float)1 / 5;
+		cube.materials[i].maps[MATERIAL_MAP_ALBEDO].texture = logo;
+		cube.materials[i].maps[MATERIAL_MAP_ALBEDO].color = GREEN;
+		cube.materials[i].maps[MATERIAL_MAP_EMISSION].color = cube.materials[i].maps[MATERIAL_MAP_ALBEDO].color;
+		cube.materials[i].maps[MATERIAL_MAP_EMISSION].texture = cube.materials[i].maps[MATERIAL_MAP_ALBEDO].texture;
+	}
+	
 
-    skybox = R3D_LoadSkybox(RESOURCES_PATH "sky/skybox1.png", CUBEMAP_LAYOUT_AUTO_DETECT);
+	
+	for (int y = 0; y < 5; y++) {
+		for (int x = 0; x < 5; x++) {
+			int i = y * 5 + x;
+			materials[i] = LoadMaterialDefault();
+			materials[i].maps[MATERIAL_MAP_EMISSION].value = 0.0f;
+			materials[i].maps[MATERIAL_MAP_OCCLUSION].value = 1.0f;
+			materials[i].maps[MATERIAL_MAP_ROUGHNESS].value = (float)x / 5;
+			materials[i].maps[MATERIAL_MAP_METALNESS].value = (float)y / 5;
+			materials[i].maps[MATERIAL_MAP_ALBEDO].color = ColorFromHSV(x / 5.0f * 330, 1.0f, 1.0f);
+			materials[i].maps[MATERIAL_MAP_EMISSION].color = materials[i].maps[MATERIAL_MAP_ALBEDO].color;
+			materials[i].maps[MATERIAL_MAP_EMISSION].texture = materials[i].maps[MATERIAL_MAP_ALBEDO].texture;
+		}
+	}
+
+	
+	skybox = R3D_LoadSkybox(RESOURCES_PATH "sky/skybox1.png", CUBEMAP_LAYOUT_AUTO_DETECT);
     R3D_EnableSkybox(skybox);
 
     camera = (Camera3D){
@@ -56,7 +90,7 @@ const char* Init(void)
         .fovy = 60,
     };
 
-    return "[r3d] - bloom example";
+    return "[r3d] - Tom bloom test example";
 }
 
 
@@ -64,10 +98,9 @@ float time = 0.0f;
 float value = 0.0f;
 void Update(float delta) {
     time += delta;
-    value = 1.0f * sinf(25.0f*time) + 3.0f;  // amplitude 3, offset 4
+    value = 1.0f * sinf(25.0f*time) + 1.0f;  // amplitude 3, offset 4
     /* value = 3.0f * sinf(100.0f*time) + 4.0f;  // amplitude 3, offset 4 */
 	R3D_SetBloomIntensity(value);
-
 	
 	UpdateCamera(&camera, CAMERA_FREE);
 }
@@ -77,17 +110,17 @@ void Draw(void)
     R3D_Begin(camera);
     for (int y = -2; y <= 1; y++) {
         for (int x = -1; x <= 2; x++) {
-            sphere.materials[0] = materials[(y + 2) * 5 + (x + 2)];
-            R3D_DrawModel(sphere, (Vector3) { x * 1.1f, y * 1.1f, 0.0f }, 1.0f);
+			sphere.materials[0] = materials[(y + 2) * 5 + (x + 2)];
+			R3D_DrawModel(sphere, (Vector3) { x * 1.1f, y * 1.1f, 0.0f }, 1.0f);
         }
     }
-    laser.materials[0] = materials[0];
 	/* laser.transform = MatrixMultiply(laser.transform, MatrixRotateX(0.01)); */
 	R3D_DrawModel(laser, (Vector3){-2 * 1.1f, -2 * 1.1f, 0.0f}, 1.0f);
+	R3D_DrawModel(cube, (Vector3){-1 * 1.1f, -1 * 1.1f, 0.0f}, 1.0f);
 	R3D_End();
 
-	R3D_DrawBufferEmission(10, 10, 100, 100);
-    R3D_DrawBufferBloom(120, 10, 100, 100);
+	/* R3D_DrawBufferEmission(10, 10, 100, 100); */
+    /* R3D_DrawBufferBloom(120, 10, 100, 100); */
 }
 
 void Close(void)
